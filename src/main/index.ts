@@ -8,9 +8,11 @@ import {
   Menu,
   nativeImage,
   desktopCapturer,
-  systemPreferences
+  systemPreferences,
+  dialog
 } from "electron"
 import * as path from "path"
+import { autoUpdater } from "electron-updater"
 
 // Keep references to prevent garbage collection
 let overlayWindow: BrowserWindow | null = null
@@ -327,12 +329,46 @@ function setupIpcHandlers() {
   })
 }
 
+// Auto-updater configuration
+function setupAutoUpdater() {
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on("update-available", (info) => {
+    console.log("Update available:", info.version)
+  })
+
+  autoUpdater.on("update-downloaded", (info) => {
+    dialog.showMessageBox({
+      type: "info",
+      title: "Update Ready",
+      message: `GhostBar ${info.version} is ready to install.`,
+      detail: "The update will be installed when you restart the app.",
+      buttons: ["Restart Now", "Later"]
+    }).then((result) => {
+      if (result.response === 0) {
+        autoUpdater.quitAndInstall()
+      }
+    })
+  })
+
+  autoUpdater.on("error", (error) => {
+    console.error("Auto-updater error:", error)
+  })
+
+  // Check for updates (only in production)
+  if (!isDev) {
+    autoUpdater.checkForUpdatesAndNotify()
+  }
+}
+
 // App lifecycle
 app.whenReady().then(() => {
   createOverlayWindow()
   createTray()
   registerGlobalShortcuts()
   setupIpcHandlers()
+  setupAutoUpdater()
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

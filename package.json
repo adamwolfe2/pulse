@@ -10,7 +10,7 @@
     "dev:main": "npm run build:main && electron .",
     "dev:renderer": "vite",
     "build": "npm run build:renderer && npm run build:main",
-    "build:main": "esbuild src/main/index.ts --bundle --platform=node --external:electron --outfile=dist/main/index.js && esbuild src/main/preload.ts --bundle --platform=node --external:electron --outfile=dist/main/preload.js",
+    "build:main": "esbuild src/main/index.ts --bundle --platform=node --external:electron --external:electron-updater --outfile=dist/main/index.js && esbuild src/main/preload.ts --bundle --platform=node --external:electron --outfile=dist/main/preload.js",
     "build:renderer": "vite build",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "electron-updater": "^6.1.7",
     "framer-motion": "^12.26.2",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",
@@ -56,7 +57,11 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": ["dmg", "zip"],
-      "icon": "assets/icon.png"
+      "icon": "assets/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
       "target": ["nsis", "portable"],
@@ -66,6 +71,11 @@
       "target": ["AppImage", "deb"],
       "icon": "assets/icon.png",
       "category": "Utility"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "adamwolfe2",
+      "repo": "ghostbar"
     }
   }
 }
