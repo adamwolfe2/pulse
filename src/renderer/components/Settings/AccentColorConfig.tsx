@@ -1,6 +1,7 @@
 import React from "react"
 import { useGhostStore } from "../../stores/ghostStore"
 import { Check } from "lucide-react"
+import { Logo } from "../Logo"
 
 const presetColors = [
   { name: "Indigo", color1: "#6366f1", color2: "#8b5cf6" },
@@ -35,7 +36,7 @@ export function AccentColorConfig() {
       <section>
         <h3 className="text-white/70 text-sm font-medium mb-3">Accent Color</h3>
         <p className="text-white/40 text-xs mb-4">
-          Choose a color theme for the GhostBar interface. This affects buttons, highlights, and accents.
+          Choose a color theme for the Pulse interface. This affects buttons, highlights, and accents.
         </p>
 
         {/* Preset Colors */}
@@ -124,16 +125,9 @@ export function AccentColorConfig() {
           }}
         >
           <div className="flex items-center gap-3">
-            <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold"
-              style={{
-                background: `linear-gradient(135deg, ${currentColor1}, ${currentColor2})`,
-              }}
-            >
-              G
-            </div>
+            <Logo size={48} />
             <div>
-              <div className="text-white/90 font-medium">GhostBar Overlay</div>
+              <div className="text-white/90 font-medium">Pulse Overlay</div>
               <div className="text-white/40 text-sm">Your AI desktop companion</div>
             </div>
           </div>

@@ -1,6 +1,6 @@
 {
-  "name": "ghostbar",
-  "displayName": "GhostBar - AI Desktop Companion",
+  "name": "pulse",
+  "displayName": "Pulse - AI Desktop Companion",
   "version": "0.2.0",
   "description": "Your intelligent AI desktop companion with floating overlay UI",
   "author": "adamwolfe2",
@@ -44,8 +44,8 @@
     "vite": "^5.0.10"
   },
   "build": {
-    "appId": "com.ghostbar.app",
-    "productName": "GhostBar",
+    "appId": "com.pulse.app",
+    "productName": "Pulse",
     "directories": {
       "output": "release"
     },
@@ -57,7 +57,7 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": ["dmg", "zip"],
-      "icon": "assets/icon.png",
+      "icon": "assets/Pulselogo.png",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
@@ -65,17 +65,17 @@
     },
     "win": {
       "target": ["nsis", "portable"],
-      "icon": "assets/icon.png"
+      "icon": "assets/Pulselogo.png"
     },
     "linux": {
       "target": ["AppImage", "deb"],
-      "icon": "assets/icon.png",
+      "icon": "assets/Pulselogo.png",
       "category": "Utility"
     },
     "publish": {
       "provider": "github",
       "owner": "adamwolfe2",
-      "repo": "ghostbar"
+      "repo": "pulse"
     }
   }
 }

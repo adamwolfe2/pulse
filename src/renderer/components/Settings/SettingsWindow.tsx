@@ -12,6 +12,7 @@ import {
   Eye
 } from "lucide-react"
 import { useGhostStore } from "../../stores/ghostStore"
+import { Logo } from "../Logo"
 import { AccentColorConfig } from "./AccentColorConfig"
 import { KeybindsConfig } from "./KeybindsConfig"
 import { BehaviorConfig } from "./BehaviorConfig"
@@ -70,9 +71,12 @@ export function SettingsWindow({ isOpen, onClose }: SettingsWindowProps) {
               }}
             >
               {/* App Title */}
-              <div className="px-3 mb-6">
-                <h1 className="text-white/90 font-semibold text-lg">GhostBar</h1>
-                <p className="text-white/40 text-xs">Settings</p>
+              <div className="px-3 mb-6 flex items-center gap-3">
+                <Logo size={32} />
+                <div>
+                  <h1 className="text-white/90 font-semibold text-lg">Pulse</h1>
+                  <p className="text-white/40 text-xs">Settings</p>
+                </div>
               </div>
 
               {/* Navigation */}
