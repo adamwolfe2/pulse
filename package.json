@@ -3,7 +3,7 @@
   "displayName": "Pulse - AI Desktop Companion",
   "version": "0.2.0",
   "description": "Your intelligent AI desktop companion with floating overlay UI",
-  "author": "adamwolfe2",
+  "author": "Adam Wolfe <adamwolfe102@gmail.com>",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:main\" \"npm run dev:renderer\"",
