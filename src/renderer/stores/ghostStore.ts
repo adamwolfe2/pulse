@@ -51,7 +51,7 @@ interface GhostState {
 // Load API key from environment or localStorage
 const getStoredApiKey = (): string => {
   try {
-    return localStorage.getItem("ghostbar_api_key") || ""
+    return localStorage.getItem("pulse_api_key") || ""
   } catch {
     return ""
   }
@@ -60,7 +60,7 @@ const getStoredApiKey = (): string => {
 // Load settings from localStorage
 const getStoredSettings = () => {
   try {
-    const stored = localStorage.getItem("ghostbar_settings")
+    const stored = localStorage.getItem("pulse_settings")
     return stored ? JSON.parse(stored) : {}
   } catch {
     return {}
@@ -120,9 +120,9 @@ export const useGhostStore = create<GhostState>((set, get) => {
       const updated = { ...state.settings, ...newSettings }
       // Persist all settings to localStorage
       try {
-        localStorage.setItem("ghostbar_settings", JSON.stringify(updated))
+        localStorage.setItem("pulse_settings", JSON.stringify(updated))
         if (newSettings.apiKey) {
-          localStorage.setItem("ghostbar_api_key", newSettings.apiKey)
+          localStorage.setItem("pulse_api_key", newSettings.apiKey)
         }
       } catch {
         // Ignore storage errors

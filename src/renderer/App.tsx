@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { GlassPanel } from "./components/GlassPanel"
 import { SettingsWindow } from "./components/Settings"
+import { Logo } from "./components/Logo"
 import { useGhostStore } from "./stores/ghostStore"
 import { analyzeScreenWithVision, streamChat } from "./lib/claude"
 import { Settings } from "lucide-react"
@@ -185,7 +186,7 @@ export function App() {
 
     try {
       if (!settings.apiKey) {
-        addMessage({ role: "assistant", content: "Please set your Claude API key in the settings to use GhostBar." })
+        addMessage({ role: "assistant", content: "Please set your Claude API key in the settings to use Pulse." })
         setIsLoading(false)
         return
       }
@@ -272,9 +273,9 @@ export function App() {
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-white/10">
             <div className="flex items-center gap-3">
-              <span className="text-2xl">👻</span>
+              <Logo size={36} />
               <div>
-                <h1 className="text-white font-semibold">GhostBar</h1>
+                <h1 className="text-white font-semibold">Pulse</h1>
                 <p className="text-white/50 text-xs">
                   {isListening ? "🎤 Listening..." : mode === "voice" ? "Voice Mode" : "Chat Mode"}
                 </p>
@@ -321,8 +322,10 @@ export function App() {
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.length === 0 && (
               <div className="text-center text-white/40 py-12">
-                <span className="text-4xl mb-4 block">👻</span>
-                <p className="text-lg mb-2">Hey! I'm GhostBar</p>
+                <div className="flex justify-center mb-4">
+                  <Logo size={64} />
+                </div>
+                <p className="text-lg mb-2">Hey! I'm Pulse</p>
                 <p className="text-sm">
                   Ask me anything, capture your screen, or use voice mode.
                 </p>

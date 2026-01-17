@@ -58,7 +58,7 @@ export function KeybindsConfig() {
       <section>
         <h3 className="text-white/70 text-sm font-medium mb-3">Keyboard Shortcuts</h3>
         <p className="text-white/40 text-xs mb-4">
-          Configure keyboard shortcuts to quickly access GhostBar features. Double-tap the chat shortcut to activate voice mode.
+          Configure keyboard shortcuts to quickly access Pulse features. Double-tap the chat shortcut to activate voice mode.
         </p>
       </section>
 

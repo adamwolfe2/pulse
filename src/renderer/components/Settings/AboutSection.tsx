@@ -1,21 +1,16 @@
 import React from "react"
 import { ExternalLink, Github, Heart, Coffee } from "lucide-react"
+import { Logo } from "../Logo"
 
 export function AboutSection() {
   return (
     <div className="space-y-6">
       {/* App Info */}
       <section className="text-center py-6">
-        <div
-          className="w-20 h-20 mx-auto rounded-2xl flex items-center justify-center text-3xl font-bold text-white mb-4"
-          style={{
-            background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-            boxShadow: "0 10px 30px -10px rgba(99, 102, 241, 0.5)",
-          }}
-        >
-          G
+        <div className="flex justify-center mb-4">
+          <Logo size={80} />
         </div>
-        <h2 className="text-white/90 text-xl font-semibold">GhostBar</h2>
+        <h2 className="text-white/90 text-xl font-semibold">Pulse</h2>
         <p className="text-white/40 text-sm mt-1">Your AI Desktop Companion</p>
         <p className="text-white/30 text-xs mt-2">Version 0.2.0</p>
       </section>
@@ -29,7 +24,7 @@ export function AboutSection() {
         }}
       >
         <p className="text-white/60 text-sm leading-relaxed">
-          GhostBar is an intelligent AI assistant that floats above your desktop,
+          Pulse is an intelligent AI assistant that floats above your desktop,
           ready to help with anything on your screen. Powered by Claude, it can
           see your screen, answer questions, and assist with tasks - all through
           a beautiful glassmorphic interface.

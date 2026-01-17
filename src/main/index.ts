@@ -66,7 +66,7 @@ function createOverlayWindow() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, "../../assets/icon.png")
+  const iconPath = path.join(__dirname, "../../assets/Pulselogo.png")
   let trayIcon: nativeImage
 
   try {
@@ -83,7 +83,7 @@ function createTray() {
     : trayIcon.resize({ width: 16, height: 16 })
 
   tray = new Tray(resizedIcon)
-  tray.setToolTip("GhostBar - AI Desktop Companion")
+  tray.setToolTip("Pulse - AI Desktop Companion")
 
   updateTrayMenu()
   tray.on("click", () => toggleOverlay("chat"))
@@ -94,7 +94,7 @@ function updateTrayMenu() {
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: "Open GhostBar",
+      label: "Open Pulse",
       accelerator: "CommandOrControl+Shift+G",
       click: () => toggleOverlay("chat")
     },
@@ -117,7 +117,7 @@ function updateTrayMenu() {
     },
     { type: "separator" },
     {
-      label: "Quit GhostBar",
+      label: "Quit Pulse",
       accelerator: "CommandOrControl+Q",
       click: () => app.quit()
     }
@@ -342,7 +342,7 @@ function setupAutoUpdater() {
     dialog.showMessageBox({
       type: "info",
       title: "Update Ready",
-      message: `GhostBar ${info.version} is ready to install.`,
+      message: `Pulse ${info.version} is ready to install.`,
       detail: "The update will be installed when you restart the app.",
       buttons: ["Restart Now", "Later"]
     }).then((result) => {

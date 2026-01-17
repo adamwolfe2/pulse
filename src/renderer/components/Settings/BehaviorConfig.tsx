@@ -70,7 +70,7 @@ export function BehaviorConfig() {
           <SettingRow
             icon={<Monitor size={18} />}
             title="Screen Capture"
-            description="Allow GhostBar to capture your screen for context-aware assistance"
+            description="Allow Pulse to capture your screen for context-aware assistance"
             enabled={settings.screenCaptureEnabled ?? true}
             onToggle={() => updateSettings({ screenCaptureEnabled: !settings.screenCaptureEnabled })}
           />
@@ -127,7 +127,7 @@ export function BehaviorConfig() {
           <SettingRow
             icon={<Mic size={18} />}
             title="Voice Mode"
-            description="Enable voice input for hands-free interaction with GhostBar"
+            description="Enable voice input for hands-free interaction with Pulse"
             enabled={settings.voiceEnabled ?? true}
             onToggle={() => updateSettings({ voiceEnabled: !settings.voiceEnabled })}
           />
@@ -141,7 +141,7 @@ export function BehaviorConfig() {
           <SettingRow
             icon={<Zap size={18} />}
             title="Launch at Login"
-            description="Automatically start GhostBar when you log in"
+            description="Automatically start Pulse when you log in"
             enabled={settings.launchAtLogin ?? false}
             onToggle={() => updateSettings({ launchAtLogin: !settings.launchAtLogin })}
           />

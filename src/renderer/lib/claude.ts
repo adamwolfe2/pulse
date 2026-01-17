@@ -96,7 +96,7 @@ export async function streamChat(
   const stream = await client.messages.stream({
     model: "claude-sonnet-4-20250514",
     max_tokens: 4096,
-    system: `You are GhostBar, a helpful AI desktop companion. You appear as a floating glassmorphic overlay on the user's screen.
+    system: `You are Pulse, a helpful AI desktop companion. You appear as a floating glassmorphic overlay on the user's screen.
 
 You can see the user's screen when they share a screenshot, and you help them with:
 - Answering questions about what's on their screen
@@ -127,7 +127,7 @@ export async function generateContextualSuggestion(apiKey: string): Promise<Sugg
   const response = await client.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 500,
-    system: `You are GhostBar, a proactive AI desktop companion. You appear as a floating glassmorphic overlay to help users.
+    system: `You are Pulse, a proactive AI desktop companion. You appear as a floating glassmorphic overlay to help users.
 
 Generate a helpful, contextual suggestion based on the current time and context. Be friendly, proactive, and useful.
 
