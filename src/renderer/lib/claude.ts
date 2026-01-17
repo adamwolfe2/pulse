@@ -1,6 +1,120 @@
 import Anthropic from "@anthropic-ai/sdk"
 import type { Suggestion, SuggestionType } from "../types"
 
+// Analyze a screenshot using Claude Vision
+export async function analyzeScreenWithVision(
+  apiKey: string,
+  screenshot: string,
+  prompt: string
+): Promise<string> {
+  const client = new Anthropic({
+    apiKey,
+    dangerouslyAllowBrowser: true
+  })
+
+  // Extract base64 data from data URL
+  const base64Data = screenshot.replace(/^data:image\/\w+;base64,/, "")
+
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 1024,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              data: base64Data
+            }
+          },
+          {
+            type: "text",
+            text: prompt
+          }
+        ]
+      }
+    ]
+  })
+
+  const content = response.content[0]
+  if (content.type !== "text") {
+    throw new Error("Unexpected response type")
+  }
+
+  return content.text
+}
+
+// Stream chat messages with optional screenshot context
+export async function streamChat(
+  apiKey: string,
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  screenshot: string | null,
+  onChunk: (chunk: string) => void
+): Promise<void> {
+  const client = new Anthropic({
+    apiKey,
+    dangerouslyAllowBrowser: true
+  })
+
+  // Build the messages array for the API
+  const apiMessages: Anthropic.MessageParam[] = messages.slice(0, -1).map(m => ({
+    role: m.role,
+    content: m.content
+  }))
+
+  // Handle the last message specially if there's a screenshot
+  const lastMessage = messages[messages.length - 1]
+  if (screenshot && lastMessage.role === "user") {
+    const base64Data = screenshot.replace(/^data:image\/\w+;base64,/, "")
+    apiMessages.push({
+      role: "user",
+      content: [
+        {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: "image/png",
+            data: base64Data
+          }
+        },
+        {
+          type: "text",
+          text: lastMessage.content
+        }
+      ]
+    })
+  } else {
+    apiMessages.push({
+      role: lastMessage.role,
+      content: lastMessage.content
+    })
+  }
+
+  const stream = await client.messages.stream({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 4096,
+    system: `You are GhostBar, a helpful AI desktop companion. You appear as a floating glassmorphic overlay on the user's screen.
+
+You can see the user's screen when they share a screenshot, and you help them with:
+- Answering questions about what's on their screen
+- Providing quick information and assistance
+- Helping with tasks they're working on
+- Being a proactive, intelligent assistant
+
+Be conversational, helpful, and concise. Your responses appear in a chat overlay, so keep them readable and not too long unless detail is needed.`,
+    messages: apiMessages
+  })
+
+  for await (const event of stream) {
+    if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+      onChunk(event.delta.text)
+    }
+  }
+}
+
 export async function generateContextualSuggestion(apiKey: string): Promise<Suggestion> {
   const client = new Anthropic({
     apiKey,

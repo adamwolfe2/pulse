@@ -1,39 +1,65 @@
 import { contextBridge, ipcRenderer } from "electron"
 
-// Expose protected methods that allow the renderer process to use
-// the ipcRenderer without exposing the entire object
+// Expose protected methods to renderer
 contextBridge.exposeInMainWorld("ghostbar", {
   // Overlay control
-  toggleOverlay: () => ipcRenderer.send("toggle-overlay"),
   hideOverlay: () => ipcRenderer.send("hide-overlay"),
   setIgnoreMouse: (ignore: boolean) => ipcRenderer.send("set-ignore-mouse", ignore),
-  setSuggestionArea: (bounds: { x: number; y: number; width: number; height: number } | null) =>
-    ipcRenderer.send("suggestion-area", bounds),
+  enableInteraction: () => ipcRenderer.send("enable-interaction"),
+
+  // Screen capture
+  captureScreen: () => ipcRenderer.invoke("capture-screen"),
+  checkScreenPermission: () => ipcRenderer.invoke("check-screen-permission"),
+
+  // Microphone
+  getMicPermission: () => ipcRenderer.invoke("get-mic-permission"),
 
   // Display info
   getDisplayInfo: () => ipcRenderer.invoke("get-display-info"),
 
   // Event listeners
-  onOverlayVisibility: (callback: (visible: boolean) => void) => {
-    ipcRenderer.on("overlay-visibility", (_, visible) => callback(visible))
+  onOverlayShow: (callback: (data: { mode: "chat" | "voice" }) => void) => {
+    ipcRenderer.on("overlay-show", (_, data) => callback(data))
+  },
+  onOverlayHide: (callback: () => void) => {
+    ipcRenderer.on("overlay-hide", () => callback())
+  },
+  onActivateVoice: (callback: () => void) => {
+    ipcRenderer.on("activate-voice", () => callback())
+  },
+  onScreenshotReady: (callback: (data: { screenshot: string }) => void) => {
+    ipcRenderer.on("screenshot-ready", (_, data) => callback(data))
+  },
+  onProactiveTrigger: (callback: (data: { screenshot: string }) => void) => {
+    ipcRenderer.on("proactive-trigger", (_, data) => callback(data))
   },
 
-  // Remove listeners
+  // Cleanup
   removeAllListeners: () => {
-    ipcRenderer.removeAllListeners("overlay-visibility")
+    ipcRenderer.removeAllListeners("overlay-show")
+    ipcRenderer.removeAllListeners("overlay-hide")
+    ipcRenderer.removeAllListeners("activate-voice")
+    ipcRenderer.removeAllListeners("screenshot-ready")
+    ipcRenderer.removeAllListeners("proactive-trigger")
   }
 })
 
-// TypeScript declaration for the exposed API
+// TypeScript declarations
 declare global {
   interface Window {
     ghostbar: {
-      toggleOverlay: () => void
       hideOverlay: () => void
       setIgnoreMouse: (ignore: boolean) => void
-      setSuggestionArea: (bounds: { x: number; y: number; width: number; height: number } | null) => void
+      enableInteraction: () => void
+      captureScreen: () => Promise<string | null>
+      checkScreenPermission: () => Promise<string>
+      getMicPermission: () => Promise<string>
       getDisplayInfo: () => Promise<{ width: number; height: number; scaleFactor: number }>
-      onOverlayVisibility: (callback: (visible: boolean) => void) => void
+      onOverlayShow: (callback: (data: { mode: "chat" | "voice" }) => void) => void
+      onOverlayHide: (callback: () => void) => void
+      onActivateVoice: (callback: () => void) => void
+      onScreenshotReady: (callback: (data: { screenshot: string }) => void) => void
+      onProactiveTrigger: (callback: (data: { screenshot: string }) => void) => void
       removeAllListeners: () => void
     }
   }

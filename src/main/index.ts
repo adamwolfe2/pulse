@@ -6,7 +6,9 @@ import {
   screen,
   Tray,
   Menu,
-  nativeImage
+  nativeImage,
+  desktopCapturer,
+  systemPreferences
 } from "electron"
 import * as path from "path"
 
@@ -14,6 +16,9 @@ import * as path from "path"
 let overlayWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isOverlayVisible = false
+let lastShortcutTime = 0
+let proactiveInterval: NodeJS.Timeout | null = null
+let isProactiveEnabled = false
 
 // Get the correct path for resources in dev vs production
 const isDev = process.env.NODE_ENV === "development"
@@ -38,7 +43,6 @@ function createOverlayWindow() {
     movable: false,
     focusable: true,
     hasShadow: false,
-    // Enable click-through for transparent areas
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -46,42 +50,32 @@ function createOverlayWindow() {
     }
   })
 
-  // Make the window click-through by default
   overlayWindow.setIgnoreMouseEvents(true, { forward: true })
-
-  // Load the renderer
   overlayWindow.loadURL(RENDERER_URL)
-
-  // Hide on start
   overlayWindow.hide()
 
-  // Handle window close
   overlayWindow.on("closed", () => {
     overlayWindow = null
   })
 
-  // Open DevTools in development
   if (isDev) {
     overlayWindow.webContents.openDevTools({ mode: "detach" })
   }
 }
 
 function createTray() {
-  // Create a simple tray icon
   const iconPath = path.join(__dirname, "../../assets/icon.png")
   let trayIcon: nativeImage
 
   try {
     trayIcon = nativeImage.createFromPath(iconPath)
     if (trayIcon.isEmpty()) {
-      // Create a simple colored icon if file not found
       trayIcon = nativeImage.createEmpty()
     }
   } catch {
     trayIcon = nativeImage.createEmpty()
   }
 
-  // Resize for tray (16x16 on most platforms)
   const resizedIcon = trayIcon.isEmpty()
     ? trayIcon
     : trayIcon.resize({ width: 16, height: 16 })
@@ -89,48 +83,60 @@ function createTray() {
   tray = new Tray(resizedIcon)
   tray.setToolTip("GhostBar - AI Desktop Companion")
 
+  updateTrayMenu()
+  tray.on("click", () => toggleOverlay("chat"))
+}
+
+function updateTrayMenu() {
+  if (!tray) return
+
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: "Show Overlay",
+      label: "Open GhostBar",
       accelerator: "CommandOrControl+Shift+G",
-      click: () => toggleOverlay()
+      click: () => toggleOverlay("chat")
     },
     {
-      label: "Settings",
-      click: () => openSettings()
+      label: "Voice Mode",
+      accelerator: "CommandOrControl+Shift+V",
+      click: () => showOverlay("voice")
+    },
+    {
+      label: "Screenshot & Ask",
+      accelerator: "CommandOrControl+Shift+S",
+      click: () => captureAndAsk()
+    },
+    { type: "separator" },
+    {
+      label: "Proactive Mode",
+      type: "checkbox",
+      checked: isProactiveEnabled,
+      click: (menuItem) => toggleProactiveMode(menuItem.checked)
     },
     { type: "separator" },
     {
       label: "Quit GhostBar",
       accelerator: "CommandOrControl+Q",
-      click: () => {
-        app.quit()
-      }
+      click: () => app.quit()
     }
   ])
 
   tray.setContextMenu(contextMenu)
-
-  // Click on tray icon toggles overlay
-  tray.on("click", () => {
-    toggleOverlay()
-  })
 }
 
-function toggleOverlay() {
+function toggleOverlay(mode: "chat" | "voice" = "chat") {
   if (!overlayWindow) return
 
   if (isOverlayVisible) {
     hideOverlay()
   } else {
-    showOverlay()
+    showOverlay(mode)
   }
 }
 
-function showOverlay() {
+function showOverlay(mode: "chat" | "voice" = "chat") {
   if (!overlayWindow) return
 
-  // Position overlay on primary display
   const primaryDisplay = screen.getPrimaryDisplay()
   const { width, height } = primaryDisplay.workAreaSize
 
@@ -139,8 +145,7 @@ function showOverlay() {
   overlayWindow.setIgnoreMouseEvents(false)
   isOverlayVisible = true
 
-  // Notify renderer
-  overlayWindow.webContents.send("overlay-visibility", true)
+  overlayWindow.webContents.send("overlay-show", { mode })
 }
 
 function hideOverlay() {
@@ -150,22 +155,121 @@ function hideOverlay() {
   overlayWindow.setIgnoreMouseEvents(true, { forward: true })
   isOverlayVisible = false
 
-  // Notify renderer
-  overlayWindow.webContents.send("overlay-visibility", false)
+  overlayWindow.webContents.send("overlay-hide")
 }
 
-function openSettings() {
-  // TODO: Open settings window
-  console.log("Opening settings...")
+// Screen capture function
+async function captureScreen(): Promise<string | null> {
+  try {
+    if (process.platform === "darwin") {
+      const status = systemPreferences.getMediaAccessStatus("screen")
+      if (status !== "granted") {
+        console.log("Screen recording permission needed. Status:", status)
+        // Trigger permission prompt
+        await desktopCapturer.getSources({ types: ["screen"] })
+      }
+    }
+
+    // Hide overlay temporarily for clean screenshot
+    const wasVisible = isOverlayVisible
+    if (wasVisible && overlayWindow) {
+      overlayWindow.hide()
+    }
+
+    // Small delay to ensure overlay is hidden
+    await new Promise(resolve => setTimeout(resolve, 100))
+
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width: 1920, height: 1080 }
+    })
+
+    // Restore overlay
+    if (wasVisible && overlayWindow) {
+      overlayWindow.show()
+    }
+
+    if (sources.length === 0) return null
+
+    const primarySource = sources[0]
+    const thumbnail = primarySource.thumbnail
+    const base64 = thumbnail.toPNG().toString("base64")
+    return `data:image/png;base64,${base64}`
+  } catch (error) {
+    console.error("Screen capture failed:", error)
+    return null
+  }
+}
+
+async function captureAndAsk() {
+  const screenshot = await captureScreen()
+  if (screenshot) {
+    showOverlay("chat")
+    setTimeout(() => {
+      overlayWindow?.webContents.send("screenshot-ready", { screenshot })
+    }, 300)
+  }
+}
+
+// Proactive mode - periodically analyze screen
+function toggleProactiveMode(enabled: boolean) {
+  isProactiveEnabled = enabled
+  updateTrayMenu()
+
+  if (enabled) {
+    console.log("Proactive mode enabled - analyzing screen every 30s")
+    proactiveInterval = setInterval(async () => {
+      if (!isOverlayVisible) {
+        const screenshot = await captureScreen()
+        if (screenshot && overlayWindow) {
+          overlayWindow.webContents.send("proactive-trigger", { screenshot })
+        }
+      }
+    }, 30000)
+  } else {
+    console.log("Proactive mode disabled")
+    if (proactiveInterval) {
+      clearInterval(proactiveInterval)
+      proactiveInterval = null
+    }
+  }
 }
 
 function registerGlobalShortcuts() {
-  // Toggle overlay with Cmd/Ctrl + Shift + G
+  // Main shortcut with double-tap detection
   globalShortcut.register("CommandOrControl+Shift+G", () => {
-    toggleOverlay()
+    const now = Date.now()
+    const timeSinceLastPress = now - lastShortcutTime
+    lastShortcutTime = now
+
+    if (timeSinceLastPress < 400) {
+      // Double-tap = voice mode
+      if (isOverlayVisible) {
+        overlayWindow?.webContents.send("activate-voice")
+      } else {
+        showOverlay("voice")
+      }
+    } else {
+      // Single tap = toggle chat
+      toggleOverlay("chat")
+    }
   })
 
-  // Hide overlay with Escape
+  // Direct voice shortcut
+  globalShortcut.register("CommandOrControl+Shift+V", () => {
+    if (isOverlayVisible) {
+      overlayWindow?.webContents.send("activate-voice")
+    } else {
+      showOverlay("voice")
+    }
+  })
+
+  // Screenshot shortcut
+  globalShortcut.register("CommandOrControl+Shift+S", () => {
+    captureAndAsk()
+  })
+
+  // Escape to hide
   globalShortcut.register("Escape", () => {
     if (isOverlayVisible) {
       hideOverlay()
@@ -173,39 +277,27 @@ function registerGlobalShortcuts() {
   })
 }
 
-// IPC Handlers
 function setupIpcHandlers() {
-  // Handle mouse events passthrough toggle
   ipcMain.on("set-ignore-mouse", (_, ignore: boolean) => {
     if (overlayWindow) {
       overlayWindow.setIgnoreMouseEvents(ignore, { forward: true })
     }
   })
 
-  // Handle overlay visibility toggle from renderer
-  ipcMain.on("toggle-overlay", () => {
-    toggleOverlay()
-  })
-
-  // Handle hide overlay request
   ipcMain.on("hide-overlay", () => {
     hideOverlay()
   })
 
-  // Handle suggestion shown - make interactive area clickable
-  ipcMain.on("suggestion-area", (_, bounds: { x: number; y: number; width: number; height: number } | null) => {
-    if (!overlayWindow) return
-
-    if (bounds) {
-      // Make only the suggestion area interactive
+  ipcMain.on("enable-interaction", () => {
+    if (overlayWindow) {
       overlayWindow.setIgnoreMouseEvents(false)
-    } else {
-      // Make entire overlay click-through again
-      overlayWindow.setIgnoreMouseEvents(true, { forward: true })
     }
   })
 
-  // Get display info
+  ipcMain.handle("capture-screen", async () => {
+    return await captureScreen()
+  })
+
   ipcMain.handle("get-display-info", () => {
     const primaryDisplay = screen.getPrimaryDisplay()
     return {
@@ -213,6 +305,25 @@ function setupIpcHandlers() {
       height: primaryDisplay.workAreaSize.height,
       scaleFactor: primaryDisplay.scaleFactor
     }
+  })
+
+  ipcMain.handle("check-screen-permission", () => {
+    if (process.platform === "darwin") {
+      return systemPreferences.getMediaAccessStatus("screen")
+    }
+    return "granted"
+  })
+
+  ipcMain.handle("get-mic-permission", async () => {
+    if (process.platform === "darwin") {
+      const status = systemPreferences.getMediaAccessStatus("microphone")
+      if (status !== "granted") {
+        const granted = await systemPreferences.askForMediaAccess("microphone")
+        return granted ? "granted" : "denied"
+      }
+      return status
+    }
+    return "granted"
   })
 }
 
@@ -237,19 +348,19 @@ app.on("window-all-closed", () => {
 })
 
 app.on("will-quit", () => {
-  // Unregister all shortcuts
   globalShortcut.unregisterAll()
+  if (proactiveInterval) {
+    clearInterval(proactiveInterval)
+  }
 })
 
-// Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
   app.quit()
 } else {
   app.on("second-instance", () => {
-    // Someone tried to run a second instance, show our overlay instead
     if (overlayWindow) {
-      showOverlay()
+      showOverlay("chat")
     }
   })
 }
