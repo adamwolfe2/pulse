@@ -2,6 +2,13 @@ import { create } from "zustand"
 import type { Suggestion } from "../types"
 import { generateContextualSuggestion } from "../lib/claude"
 
+interface Keybind {
+  id: string
+  action: string
+  keys: string[]
+  enabled: boolean
+}
+
 interface GhostState {
   // Current suggestion being displayed
   currentSuggestion: Suggestion | null
@@ -19,6 +26,17 @@ interface GhostState {
   settings: {
     apiKey: string
     enabled: boolean
+    // Appearance
+    accentColor: string
+    accentColor2: string
+    // Behavior
+    screenCaptureEnabled: boolean
+    proactiveEnabled: boolean
+    proactiveInterval: number
+    voiceEnabled: boolean
+    launchAtLogin: boolean
+    // Keybinds
+    keybinds: Keybind[]
   }
 
   // Actions
@@ -39,14 +57,45 @@ const getStoredApiKey = (): string => {
   }
 }
 
-export const useGhostStore = create<GhostState>((set, get) => ({
+// Load settings from localStorage
+const getStoredSettings = () => {
+  try {
+    const stored = localStorage.getItem("ghostbar_settings")
+    return stored ? JSON.parse(stored) : {}
+  } catch {
+    return {}
+  }
+}
+
+const defaultKeybinds: Keybind[] = [
+  { id: "toggle-chat", action: "Toggle Chat Overlay", keys: ["CommandOrControl", "Shift", "G"], enabled: true },
+  { id: "voice-mode", action: "Voice Input Mode", keys: ["CommandOrControl", "Shift", "V"], enabled: true },
+  { id: "screenshot", action: "Capture Screen", keys: ["CommandOrControl", "Shift", "S"], enabled: true },
+  { id: "hide-overlay", action: "Hide Overlay", keys: ["Escape"], enabled: true },
+]
+
+export const useGhostStore = create<GhostState>((set, get) => {
+  const storedSettings = getStoredSettings()
+
+  return {
   currentSuggestion: null,
   history: [],
   isLoading: false,
   error: null,
   settings: {
     apiKey: getStoredApiKey(),
-    enabled: true
+    enabled: true,
+    // Appearance
+    accentColor: storedSettings.accentColor || "#6366f1",
+    accentColor2: storedSettings.accentColor2 || "#8b5cf6",
+    // Behavior
+    screenCaptureEnabled: storedSettings.screenCaptureEnabled ?? true,
+    proactiveEnabled: storedSettings.proactiveEnabled ?? false,
+    proactiveInterval: storedSettings.proactiveInterval ?? 30,
+    voiceEnabled: storedSettings.voiceEnabled ?? true,
+    launchAtLogin: storedSettings.launchAtLogin ?? false,
+    // Keybinds
+    keybinds: storedSettings.keybinds || defaultKeybinds,
   },
 
   setSuggestion: (suggestion) => {
@@ -67,17 +116,19 @@ export const useGhostStore = create<GhostState>((set, get) => ({
   setError: (error) => set({ error }),
 
   updateSettings: (newSettings) => {
-    set((state) => ({
-      settings: { ...state.settings, ...newSettings }
-    }))
-    // Persist API key
-    if (newSettings.apiKey) {
+    set((state) => {
+      const updated = { ...state.settings, ...newSettings }
+      // Persist all settings to localStorage
       try {
-        localStorage.setItem("ghostbar_api_key", newSettings.apiKey)
+        localStorage.setItem("ghostbar_settings", JSON.stringify(updated))
+        if (newSettings.apiKey) {
+          localStorage.setItem("ghostbar_api_key", newSettings.apiKey)
+        }
       } catch {
         // Ignore storage errors
       }
-    }
+      return { settings: updated }
+    })
   },
 
   triggerNewSuggestion: async () => {
@@ -104,7 +155,7 @@ export const useGhostStore = create<GhostState>((set, get) => ({
       setLoading(false)
     }
   }
-}))
+}})
 
 // Demo suggestions that cycle through
 let demoIndex = 0
