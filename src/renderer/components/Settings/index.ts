@@ -1,0 +1,5 @@
+export { SettingsWindow } from "./SettingsWindow"
+export { AccentColorConfig } from "./AccentColorConfig"
+export { KeybindsConfig } from "./KeybindsConfig"
+export { BehaviorConfig } from "./BehaviorConfig"
+export { AboutSection } from "./AboutSection"

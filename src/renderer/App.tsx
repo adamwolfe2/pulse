@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { GlassPanel } from "./components/GlassPanel"
+import { SettingsWindow } from "./components/Settings"
 import { useGhostStore } from "./stores/ghostStore"
 import { analyzeScreenWithVision, streamChat } from "./lib/claude"
+import { Settings } from "lucide-react"
 
 interface Message {
   id: string
@@ -21,6 +23,7 @@ export function App() {
   const [isListening, setIsListening] = useState(false)
   const [currentScreenshot, setCurrentScreenshot] = useState<string | null>(null)
   const [streamingContent, setStreamingContent] = useState("")
+  const [showSettings, setShowSettings] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -238,9 +241,15 @@ export function App() {
     window.ghostbar?.hideOverlay()
   }
 
-  if (!isVisible) return null
+  if (!isVisible && !showSettings) return null
 
   return (
+    <>
+      {/* Settings Window - can be shown independently */}
+      <SettingsWindow isOpen={showSettings} onClose={() => setShowSettings(false)} />
+
+      {/* Main overlay */}
+      {isVisible && (
     <div className="fixed inset-0 flex items-center justify-center p-8">
       {/* Backdrop */}
       <motion.div
@@ -289,6 +298,14 @@ export function App() {
                 title="Voice Mode (⌘⇧V)"
               >
                 <span className="text-lg">{isListening ? "🔴" : "🎤"}</span>
+              </button>
+              {/* Settings button */}
+              <button
+                onClick={() => setShowSettings(true)}
+                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                title="Settings"
+              >
+                <Settings size={18} className="text-white/70" />
               </button>
               {/* Close button */}
               <button
@@ -445,6 +462,8 @@ export function App() {
         </GlassPanel>
       </motion.div>
     </div>
+      )}
+    </>
   )
 }
 
