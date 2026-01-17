@@ -2,7 +2,9 @@
 node_modules/
 
 # Build output
+dist/
 build/
+release/
 .plasmo/
 
 # Environment files
@@ -24,6 +26,10 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-# Chrome extension
+# Electron
 *.crx
 *.pem
+out/
+
+# Old Plasmo files
+electron-esbuild.config.yaml
