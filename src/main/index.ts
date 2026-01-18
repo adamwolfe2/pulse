@@ -13,6 +13,10 @@ import {
 } from "electron"
 import * as path from "path"
 import { autoUpdater } from "electron-updater"
+import { initializeDatabase, closeDatabase } from "./database"
+import { registerDatabaseHandlers } from "./services/databaseIpc"
+import { initializeKeyVault } from "./services/keyVault"
+import { registerVaultHandlers } from "./services/vaultIpc"
 
 // Keep references to prevent garbage collection
 let overlayWindow: BrowserWindow | null = null
@@ -334,36 +338,83 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
 
+  autoUpdater.on("checking-for-update", () => {
+    console.log("Checking for updates...")
+    overlayWindow?.webContents.send("update-status", { status: "checking" })
+  })
+
   autoUpdater.on("update-available", (info) => {
     console.log("Update available:", info.version)
+    overlayWindow?.webContents.send("update-status", {
+      status: "available",
+      version: info.version,
+      releaseNotes: info.releaseNotes
+    })
+  })
+
+  autoUpdater.on("update-not-available", () => {
+    console.log("App is up to date")
+    overlayWindow?.webContents.send("update-status", { status: "up-to-date" })
+  })
+
+  autoUpdater.on("download-progress", (progress) => {
+    overlayWindow?.webContents.send("update-status", {
+      status: "downloading",
+      percent: Math.round(progress.percent),
+      bytesPerSecond: progress.bytesPerSecond,
+      transferred: progress.transferred,
+      total: progress.total
+    })
   })
 
   autoUpdater.on("update-downloaded", (info) => {
-    dialog.showMessageBox({
-      type: "info",
-      title: "Update Ready",
-      message: `Pulse ${info.version} is ready to install.`,
-      detail: "The update will be installed when you restart the app.",
-      buttons: ["Restart Now", "Later"]
-    }).then((result) => {
-      if (result.response === 0) {
-        autoUpdater.quitAndInstall()
-      }
+    console.log("Update downloaded:", info.version)
+    overlayWindow?.webContents.send("update-status", {
+      status: "ready",
+      version: info.version,
+      releaseNotes: info.releaseNotes
     })
   })
 
   autoUpdater.on("error", (error) => {
     console.error("Auto-updater error:", error)
+    overlayWindow?.webContents.send("update-status", {
+      status: "error",
+      error: error.message
+    })
   })
 
-  // Check for updates (only in production)
+  // IPC handlers for update actions
+  ipcMain.handle("update:check", async () => {
+    try {
+      const result = await autoUpdater.checkForUpdates()
+      return { success: true, version: result?.updateInfo?.version }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  ipcMain.handle("update:install", () => {
+    autoUpdater.quitAndInstall(false, true)
+  })
+
+  // Check for updates periodically in production (every 4 hours)
   if (!isDev) {
     autoUpdater.checkForUpdatesAndNotify()
+    setInterval(() => {
+      autoUpdater.checkForUpdatesAndNotify()
+    }, 4 * 60 * 60 * 1000)
   }
 }
 
 // App lifecycle
 app.whenReady().then(() => {
+  // Initialize services
+  initializeDatabase()
+  registerDatabaseHandlers()
+  initializeKeyVault()
+  registerVaultHandlers()
+
   createOverlayWindow()
   createTray()
   registerGlobalShortcuts()
@@ -388,6 +439,7 @@ app.on("will-quit", () => {
   if (proactiveInterval) {
     clearInterval(proactiveInterval)
   }
+  closeDatabase()
 })
 
 const gotTheLock = app.requestSingleInstanceLock()

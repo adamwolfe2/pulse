@@ -2,10 +2,17 @@ import { useEffect, useState, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { GlassPanel } from "./components/GlassPanel"
 import { SettingsWindow } from "./components/Settings"
+import { OnboardingFlow } from "./components/Onboarding"
 import { Logo } from "./components/Logo"
-import { usePulseStore } from "./stores/pulseStore"
+import { MarkdownRenderer } from "./components/MarkdownRenderer"
+import { ConversationSidebar } from "./components/ConversationSidebar"
+import { ErrorBoundary } from "./components/ErrorBoundary"
+import { NetworkStatusIndicator, ErrorToast } from "./components/NetworkStatusIndicator"
+import { useNetworkStatus, parseApiError, ErrorType } from "./hooks/useNetworkStatus"
+import { UpdateNotification } from "./components/UpdateNotification"
+import { usePulseStore, initializeApiKey } from "./stores/pulseStore"
 import { analyzeScreenWithVision, streamChat } from "./lib/claude"
-import { Settings } from "lucide-react"
+import { Settings, Menu } from "lucide-react"
 
 interface Message {
   id: string
@@ -25,12 +32,86 @@ export function App() {
   const [currentScreenshot, setCurrentScreenshot] = useState<string | null>(null)
   const [streamingContent, setStreamingContent] = useState("")
   const [showSettings, setShowSettings] = useState(false)
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [showSidebar, setShowSidebar] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(false)
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null)
+  const [errorToast, setErrorToast] = useState<{ message: string; type: "error" | "warning" } | null>(null)
+
+  const { isOnline, isApiReachable, checkApiReachability } = useNetworkStatus()
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
 
-  const { settings } = usePulseStore()
+  const { settings, updateSettings } = usePulseStore()
+
+  // Initialize: load API key from vault and check if onboarding is needed
+  useEffect(() => {
+    async function initialize() {
+      // Load API key from secure vault
+      const apiKey = await initializeApiKey()
+      if (apiKey) {
+        updateSettings({ apiKey })
+      }
+
+      // Check if onboarding is complete
+      const onboardingComplete = localStorage.getItem("pulse_onboarding_complete")
+      if (!onboardingComplete && !apiKey) {
+        setShowOnboarding(true)
+      }
+
+      setIsInitialized(true)
+    }
+
+    initialize()
+  }, [])
+
+  // Create a new conversation
+  const createNewConversation = useCallback(async () => {
+    try {
+      const conv = await window.pulse?.db?.conversations?.create()
+      if (conv) {
+        setCurrentConversationId(conv.id)
+        setMessages([])
+      }
+    } catch (error) {
+      console.error("Failed to create conversation:", error)
+    }
+  }, [])
+
+  // Load conversation with messages
+  const loadConversation = useCallback(async (conversationId: string) => {
+    try {
+      const conv = await window.pulse?.db?.conversations?.getWithMessages(conversationId)
+      if (conv) {
+        setCurrentConversationId(conv.id)
+        setMessages(
+          conv.messages.map((m: { id: string; role: string; content: string; createdAt: number }) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            timestamp: m.createdAt
+          }))
+        )
+      }
+    } catch (error) {
+      console.error("Failed to load conversation:", error)
+    }
+  }, [])
+
+  // Save message to database
+  const saveMessage = useCallback(async (conversationId: string, msg: { role: string; content: string }) => {
+    try {
+      await window.pulse?.db?.messages?.add(conversationId, {
+        role: msg.role as "user" | "assistant" | "system",
+        content: msg.content,
+        tokensUsed: 0
+      })
+    } catch (error) {
+      console.error("Failed to save message:", error)
+    }
+  }, [])
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -160,14 +241,21 @@ export function App() {
     }
   }, [isListening])
 
-  const addMessage = useCallback((msg: Omit<Message, "id" | "timestamp">) => {
+  const addMessage = useCallback(async (msg: Omit<Message, "id" | "timestamp">, skipDb = false) => {
     const newMessage: Message = {
       ...msg,
       id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: Date.now()
     }
     setMessages(prev => [...prev, newMessage])
-  }, [])
+
+    // Save to database if we have a conversation
+    if (!skipDb && currentConversationId) {
+      await saveMessage(currentConversationId, msg)
+    }
+
+    return newMessage
+  }, [currentConversationId, saveMessage])
 
   const handleSend = async () => {
     const text = inputValue.trim()
@@ -178,15 +266,29 @@ export function App() {
       stopListening()
     }
 
+    // Create a new conversation if we don't have one
+    let convId = currentConversationId
+    if (!convId) {
+      try {
+        const conv = await window.pulse?.db?.conversations?.create()
+        if (conv) {
+          convId = conv.id
+          setCurrentConversationId(conv.id)
+        }
+      } catch (error) {
+        console.error("Failed to create conversation:", error)
+      }
+    }
+
     // Add user message
-    addMessage({ role: "user", content: text, screenshot: currentScreenshot || undefined })
+    await addMessage({ role: "user", content: text, screenshot: currentScreenshot || undefined })
     setInputValue("")
     setIsLoading(true)
     setStreamingContent("")
 
     try {
       if (!settings.apiKey) {
-        addMessage({ role: "assistant", content: "Please set your Claude API key in the settings to use Pulse." })
+        await addMessage({ role: "assistant", content: "Please set your Claude API key in the settings to use Pulse." })
         setIsLoading(false)
         return
       }
@@ -211,13 +313,29 @@ export function App() {
       )
 
       // Add final message
-      addMessage({ role: "assistant", content: fullResponse })
+      await addMessage({ role: "assistant", content: fullResponse })
       setStreamingContent("")
       setCurrentScreenshot(null) // Clear screenshot after using
 
     } catch (error) {
       console.error("Chat error:", error)
-      addMessage({ role: "assistant", content: "Sorry, something went wrong. Please try again." })
+      const apiError = parseApiError(error)
+
+      // Show appropriate error message
+      let errorMessage = apiError.message
+      if (apiError.type === ErrorType.API_KEY) {
+        errorMessage = "Invalid API key. Please check your settings."
+      } else if (apiError.type === ErrorType.RATE_LIMIT) {
+        errorMessage = "Rate limit reached. Please wait a moment."
+      } else if (apiError.type === ErrorType.NETWORK) {
+        errorMessage = "Connection lost. Please check your internet."
+      }
+
+      await addMessage({ role: "assistant", content: errorMessage })
+      setErrorToast({ message: errorMessage, type: apiError.retryable ? "warning" : "error" })
+
+      // Auto-dismiss toast after 5 seconds
+      setTimeout(() => setErrorToast(null), 5000)
     } finally {
       setIsLoading(false)
     }
@@ -242,10 +360,49 @@ export function App() {
     window.pulse?.hideOverlay()
   }
 
+  // Show nothing until initialized
+  if (!isInitialized) return null
+
+  // Show onboarding for first-time users
+  if (showOnboarding) {
+    return <OnboardingFlow onComplete={() => setShowOnboarding(false)} />
+  }
+
   if (!isVisible && !showSettings) return null
 
   return (
-    <>
+    <ErrorBoundary>
+      {/* Network Status */}
+      <NetworkStatusIndicator
+        isOnline={isOnline}
+        isApiReachable={isApiReachable}
+        onRetry={checkApiReachability}
+      />
+
+      {/* Update Notification */}
+      <UpdateNotification />
+
+      {/* Error Toast */}
+      {errorToast && (
+        <ErrorToast
+          message={errorToast.message}
+          type={errorToast.type}
+          onDismiss={() => setErrorToast(null)}
+        />
+      )}
+
+      {/* Conversation Sidebar */}
+      <ConversationSidebar
+        isOpen={showSidebar}
+        onClose={() => setShowSidebar(false)}
+        currentConversationId={currentConversationId}
+        onSelectConversation={loadConversation}
+        onNewConversation={() => {
+          setCurrentConversationId(null)
+          setMessages([])
+        }}
+      />
+
       {/* Settings Window - can be shown independently */}
       <SettingsWindow isOpen={showSettings} onClose={() => setShowSettings(false)} />
 
@@ -282,6 +439,14 @@ export function App() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {/* Sidebar toggle */}
+              <button
+                onClick={() => setShowSidebar(true)}
+                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                title="Conversation History"
+              >
+                <Menu size={18} className="text-white/70" />
+              </button>
               {/* Screenshot button */}
               <button
                 onClick={handleCaptureScreen}
@@ -368,7 +533,11 @@ export function App() {
                         className="rounded-lg mb-2 max-h-32 object-contain"
                       />
                     )}
-                    <p className="whitespace-pre-wrap">{message.content}</p>
+                    {message.role === "assistant" ? (
+                      <MarkdownRenderer content={message.content} />
+                    ) : (
+                      <p className="whitespace-pre-wrap">{message.content}</p>
+                    )}
                   </div>
                 </motion.div>
               ))}
@@ -382,7 +551,7 @@ export function App() {
                 className="flex justify-start"
               >
                 <div className="max-w-[80%] rounded-2xl px-4 py-3 bg-white/10 text-white/90">
-                  <p className="whitespace-pre-wrap">{streamingContent}</p>
+                  <MarkdownRenderer content={streamingContent} />
                   <span className="inline-block w-2 h-4 bg-white/50 animate-pulse ml-1" />
                 </div>
               </motion.div>
@@ -466,7 +635,7 @@ export function App() {
       </motion.div>
     </div>
       )}
-    </>
+    </ErrorBoundary>
   )
 }
 

@@ -10,7 +10,7 @@
     "dev:main": "npm run build:main && electron .",
     "dev:renderer": "vite",
     "build": "npm run build:renderer && npm run build:main",
-    "build:main": "esbuild src/main/index.ts --bundle --platform=node --external:electron --external:electron-updater --outfile=dist/main/index.js && esbuild src/main/preload.ts --bundle --platform=node --external:electron --outfile=dist/main/preload.js",
+    "build:main": "esbuild src/main/index.ts --bundle --platform=node --external:electron --external:electron-updater --external:better-sqlite3 --outfile=dist/main/index.js && esbuild src/main/preload.ts --bundle --platform=node --external:electron --outfile=dist/main/preload.js",
     "build:renderer": "vite build",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",
@@ -21,17 +21,24 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "better-sqlite3": "^12.6.2",
     "electron-updater": "^6.1.7",
     "framer-motion": "^12.26.2",
     "lucide-react": "^0.562.0",
+    "prism-react-renderer": "^2.4.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "uuid": "^13.0.0",
     "zustand": "^5.0.10"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.10.0",
     "@types/react": "^19.2.8",
     "@types/react-dom": "^19.2.3",
+    "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.0",
     "concurrently": "^8.2.2",
@@ -52,11 +59,20 @@
     "files": [
       "dist/**/*",
       "assets/**/*",
-      "package.json"
+      "package.json",
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/bindings/**/*",
+      "node_modules/file-uri-to-path/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "assets/Pulselogo.png",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
@@ -64,11 +80,17 @@
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "assets/Pulselogo.png"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "assets/Pulselogo.png",
       "category": "Utility"
     },
