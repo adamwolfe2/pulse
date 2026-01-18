@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion"
 import { GlassPanel } from "./components/GlassPanel"
 import { SettingsWindow } from "./components/Settings"
 import { Logo } from "./components/Logo"
-import { useGhostStore } from "./stores/ghostStore"
+import { usePulseStore } from "./stores/pulseStore"
 import { analyzeScreenWithVision, streamChat } from "./lib/claude"
 import { Settings } from "lucide-react"
 
@@ -30,7 +30,7 @@ export function App() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
 
-  const { settings } = useGhostStore()
+  const { settings } = usePulseStore()
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -46,7 +46,7 @@ export function App() {
 
   // Set up event listeners
   useEffect(() => {
-    window.ghostbar?.onOverlayShow(({ mode: newMode }) => {
+    window.pulse?.onOverlayShow(({ mode: newMode }) => {
       setIsVisible(true)
       setMode(newMode)
       if (newMode === "voice") {
@@ -54,17 +54,17 @@ export function App() {
       }
     })
 
-    window.ghostbar?.onOverlayHide(() => {
+    window.pulse?.onOverlayHide(() => {
       setIsVisible(false)
       stopListening()
     })
 
-    window.ghostbar?.onActivateVoice(() => {
+    window.pulse?.onActivateVoice(() => {
       setMode("voice")
       startListening()
     })
 
-    window.ghostbar?.onScreenshotReady(({ screenshot }) => {
+    window.pulse?.onScreenshotReady(({ screenshot }) => {
       setCurrentScreenshot(screenshot)
       setIsVisible(true)
       setMode("chat")
@@ -75,7 +75,7 @@ export function App() {
       })
     })
 
-    window.ghostbar?.onProactiveTrigger(async ({ screenshot }) => {
+    window.pulse?.onProactiveTrigger(async ({ screenshot }) => {
       // Analyze screenshot proactively
       if (settings.apiKey) {
         try {
@@ -86,7 +86,7 @@ export function App() {
             setCurrentScreenshot(screenshot)
             setIsVisible(true)
             addMessage({ role: "assistant", content: analysis })
-            window.ghostbar?.enableInteraction()
+            window.pulse?.enableInteraction()
           }
         } catch (error) {
           console.error("Proactive analysis failed:", error)
@@ -95,7 +95,7 @@ export function App() {
     })
 
     return () => {
-      window.ghostbar?.removeAllListeners()
+      window.pulse?.removeAllListeners()
     }
   }, [settings.apiKey])
 
@@ -137,7 +137,7 @@ export function App() {
   }, [])
 
   const startListening = useCallback(async () => {
-    const permission = await window.ghostbar?.getMicPermission()
+    const permission = await window.pulse?.getMicPermission()
     if (permission !== "granted") {
       addMessage({ role: "assistant", content: "Microphone permission is needed for voice mode. Please grant access in System Preferences." })
       return
@@ -231,7 +231,7 @@ export function App() {
   }
 
   const handleCaptureScreen = async () => {
-    const screenshot = await window.ghostbar?.captureScreen()
+    const screenshot = await window.pulse?.captureScreen()
     if (screenshot) {
       setCurrentScreenshot(screenshot)
       addMessage({ role: "assistant", content: "Got it! I can see your screen now. What would you like to know?" })
@@ -239,7 +239,7 @@ export function App() {
   }
 
   const handleClose = () => {
-    window.ghostbar?.hideOverlay()
+    window.pulse?.hideOverlay()
   }
 
   if (!isVisible && !showSettings) return null

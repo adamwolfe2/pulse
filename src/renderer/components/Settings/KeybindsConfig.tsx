@@ -1,5 +1,5 @@
 import React, { useState } from "react"
-import { useGhostStore } from "../../stores/ghostStore"
+import { usePulseStore } from "../../stores/pulseStore"
 import { Command, Keyboard, Plus, Trash2, RotateCcw } from "lucide-react"
 
 interface Keybind {
@@ -17,7 +17,7 @@ const defaultKeybinds: Keybind[] = [
 ]
 
 export function KeybindsConfig() {
-  const { settings, updateSettings } = useGhostStore()
+  const { settings, updateSettings } = usePulseStore()
   const [keybinds, setKeybinds] = useState<Keybind[]>(
     settings.keybinds || defaultKeybinds
   )

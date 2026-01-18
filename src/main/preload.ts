@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron"
 
 // Expose protected methods to renderer
-contextBridge.exposeInMainWorld("ghostbar", {
+contextBridge.exposeInMainWorld("pulse", {
   // Overlay control
   hideOverlay: () => ipcRenderer.send("hide-overlay"),
   setIgnoreMouse: (ignore: boolean) => ipcRenderer.send("set-ignore-mouse", ignore),
@@ -47,7 +47,7 @@ contextBridge.exposeInMainWorld("ghostbar", {
 // TypeScript declarations
 declare global {
   interface Window {
-    ghostbar: {
+    pulse: {
       hideOverlay: () => void
       setIgnoreMouse: (ignore: boolean) => void
       enableInteraction: () => void

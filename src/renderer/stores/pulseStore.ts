@@ -9,7 +9,7 @@ interface Keybind {
   enabled: boolean
 }
 
-interface GhostState {
+interface PulseState {
   // Current suggestion being displayed
   currentSuggestion: Suggestion | null
 
@@ -44,7 +44,7 @@ interface GhostState {
   addToHistory: (suggestion: Suggestion) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
-  updateSettings: (settings: Partial<GhostState["settings"]>) => void
+  updateSettings: (settings: Partial<PulseState["settings"]>) => void
   triggerNewSuggestion: () => Promise<void>
 }
 
@@ -74,7 +74,7 @@ const defaultKeybinds: Keybind[] = [
   { id: "hide-overlay", action: "Hide Overlay", keys: ["Escape"], enabled: true },
 ]
 
-export const useGhostStore = create<GhostState>((set, get) => {
+export const usePulseStore = create<PulseState>((set, get) => {
   const storedSettings = getStoredSettings()
 
   return {

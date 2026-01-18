@@ -1,5 +1,5 @@
 import React from "react"
-import { useGhostStore } from "../../stores/ghostStore"
+import { usePulseStore } from "../../stores/pulseStore"
 import { Check } from "lucide-react"
 import { Logo } from "../Logo"
 
@@ -15,7 +15,7 @@ const presetColors = [
 ]
 
 export function AccentColorConfig() {
-  const { settings, updateSettings } = useGhostStore()
+  const { settings, updateSettings } = usePulseStore()
   const currentColor1 = settings.accentColor || "#6366f1"
   const currentColor2 = settings.accentColor2 || "#8b5cf6"
 
