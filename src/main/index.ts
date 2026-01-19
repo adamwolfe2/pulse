@@ -75,12 +75,16 @@ function getWidgetPosition() {
 function createWidgetWindow() {
   const { x, y } = getWidgetPosition()
 
+  // Use different settings for macOS vs other platforms
+  const isMac = process.platform === "darwin"
+
   widgetWindow = new BrowserWindow({
     width: WIDGET_WIDTH,
     height: WIDGET_HEIGHT,
     x,
     y,
-    transparent: true,
+    // Transparency settings - macOS handles this differently
+    transparent: isMac,
     frame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
@@ -88,17 +92,41 @@ function createWidgetWindow() {
     movable: false,
     focusable: true,
     hasShadow: true,
-    backgroundColor: "#00000000",
+    // Use solid background color for better compatibility
+    // The app container provides its own rounded corners and styling
+    backgroundColor: isMac ? "#00000000" : "#0a0a0f",
     roundedCorners: true,
+    // Enable hardware acceleration for better rendering
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, "preload.js")
+      preload: path.join(__dirname, "preload.js"),
+      // Enable hardware acceleration
+      enableBlinkFeatures: "CSSColorSchemeUARendering"
     }
   })
 
+  console.log("[Main] Loading renderer URL:", RENDERER_URL)
+  console.log("[Main] Preload path:", path.join(__dirname, "preload.js"))
+
   widgetWindow.loadURL(RENDERER_URL)
   widgetWindow.hide()
+
+  // Log when the page finishes loading
+  widgetWindow.webContents.on("did-finish-load", () => {
+    console.log("[Main] Renderer finished loading")
+  })
+
+  // Log any renderer errors
+  widgetWindow.webContents.on("did-fail-load", (_, errorCode, errorDescription) => {
+    console.error("[Main] Renderer failed to load:", errorCode, errorDescription)
+  })
+
+  // Log console messages from the renderer
+  widgetWindow.webContents.on("console-message", (_, level, message, line, sourceId) => {
+    const levelName = ["verbose", "info", "warning", "error"][level] || "log"
+    console.log(`[Renderer ${levelName}] ${message}`)
+  })
 
   // Hide when losing focus (click outside)
   widgetWindow.on("blur", () => {

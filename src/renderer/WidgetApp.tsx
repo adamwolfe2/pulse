@@ -55,6 +55,9 @@ const viewTransition = {
 }
 
 export function WidgetApp() {
+  // Debug logging
+  console.log("[WidgetApp] Component rendering...")
+
   const [view, setView] = useState<WidgetView>("home")
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
@@ -70,6 +73,8 @@ export function WidgetApp() {
   const inputRef = useRef<HTMLInputElement>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const { settings, updateSettings } = usePulseStore()
+
+  console.log("[WidgetApp] Hooks initialized, isInitialized:", isInitialized)
 
   // Initialize
   useEffect(() => {
