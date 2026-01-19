@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react"
-import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion"
-import { Mic, Send, Camera, Settings, Sparkles, MessageSquare, X, Zap } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
+import { Mic, Send, Camera, X, Sparkles } from "lucide-react"
 import { usePulseStore, initializeApiKey } from "./stores/pulseStore"
 import { streamChat } from "./lib/claude"
 import { MarkdownRenderer } from "./components/MarkdownRenderer"
@@ -15,6 +15,45 @@ interface Message {
 
 type WidgetView = "home" | "chat" | "voice"
 
+// Atoll-style spring animations
+// Based on: spring(response: 0.42, dampingFraction: 0.8) for open
+// And: spring(response: 0.45, dampingFraction: 1.0) for close
+const springOpen = {
+  type: "spring" as const,
+  stiffness: 224,
+  damping: 24,
+  mass: 1
+}
+
+const springClose = {
+  type: "spring" as const,
+  stiffness: 195,
+  damping: 28,
+  mass: 1
+}
+
+const springBouncy = {
+  type: "spring" as const,
+  stiffness: 400,
+  damping: 17,
+  mass: 1
+}
+
+const springSmooth = {
+  type: "spring" as const,
+  stiffness: 300,
+  damping: 30,
+  mass: 1
+}
+
+// View transition - scale 0.8 → 1.0 with opacity
+const viewTransition = {
+  initial: { opacity: 0, scale: 0.85 },
+  animate: { opacity: 1, scale: 1 },
+  exit: { opacity: 0, scale: 0.85 },
+  transition: { duration: 0.35, ease: [0.4, 0, 0.2, 1] }
+}
+
 export function WidgetApp() {
   const [view, setView] = useState<WidgetView>("home")
   const [messages, setMessages] = useState<Message[]>([])
@@ -26,17 +65,11 @@ export function WidgetApp() {
   const [isInitialized, setIsInitialized] = useState(false)
   const [showApiKeyInput, setShowApiKeyInput] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState("")
+  const [isHovered, setIsHovered] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const { settings, updateSettings } = usePulseStore()
-
-  // Mouse position for magnetic effect
-  const mouseX = useMotionValue(0)
-  const mouseY = useMotionValue(0)
-  const springConfig = { damping: 25, stiffness: 200 }
-  const x = useSpring(mouseX, springConfig)
-  const y = useSpring(mouseY, springConfig)
 
   // Initialize
   useEffect(() => {
@@ -52,22 +85,6 @@ export function WidgetApp() {
       setIsInitialized(true)
     }
     initialize()
-  }, [])
-
-  // Mouse tracking for magnetic effect
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      const rect = document.body.getBoundingClientRect()
-      const centerX = rect.width / 2
-      const centerY = rect.height / 2
-      const deltaX = (e.clientX - centerX) / 50
-      const deltaY = (e.clientY - centerY) / 50
-      mouseX.set(deltaX)
-      mouseY.set(deltaY)
-    }
-
-    window.addEventListener("mousemove", handleMouseMove)
-    return () => window.removeEventListener("mousemove", handleMouseMove)
   }, [])
 
   // Widget events
@@ -225,7 +242,7 @@ export function WidgetApp() {
 
   if (!isInitialized) {
     return (
-      <div className="w-full h-full flex items-center justify-center">
+      <div className="w-full h-full flex items-center justify-center bg-black/90 rounded-3xl">
         <motion.div
           animate={{ rotate: 360 }}
           transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
@@ -237,89 +254,126 @@ export function WidgetApp() {
 
   return (
     <motion.div
-      style={{ x, y }}
-      initial={{ opacity: 0, y: -20, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ type: "spring", damping: 20, stiffness: 300 }}
-      className="w-full h-full rounded-2xl overflow-hidden flex flex-col"
+      className="w-full h-full overflow-hidden flex flex-col relative"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      initial={{ opacity: 0, y: -30, scale: 0.92 }}
+      animate={{
+        opacity: 1,
+        y: 0,
+        scale: 1,
+        // Subtle hover expansion like Atoll
+        ...(isHovered && { scale: 1.005 })
+      }}
+      transition={springOpen}
     >
-      {/* Animated gradient background */}
-      <div
-        className="absolute inset-0 rounded-2xl"
-        style={{
-          background: "linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(30, 25, 40, 0.95) 100%)",
-          backdropFilter: "blur(40px)",
-          WebkitBackdropFilter: "blur(40px)",
-          border: "1px solid rgba(255, 255, 255, 0.1)",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.05) inset"
-        }}
-      />
-
-      {/* Pulsing glow effect */}
+      {/* Notch-style background with corner radius */}
       <motion.div
-        className="absolute inset-0 rounded-2xl pointer-events-none"
-        animate={{
-          boxShadow: [
-            "0 0 20px 0px rgba(99, 102, 241, 0.0)",
-            "0 0 30px 5px rgba(99, 102, 241, 0.15)",
-            "0 0 20px 0px rgba(99, 102, 241, 0.0)"
-          ]
+        className="absolute inset-0 overflow-hidden"
+        style={{
+          background: "linear-gradient(180deg, rgba(0,0,0,0.98) 0%, rgba(15,15,20,0.98) 100%)",
+          borderRadius: isHovered ? 28 : 24,
         }}
-        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+        animate={{
+          borderRadius: isHovered ? 28 : 24,
+          boxShadow: isHovered
+            ? "0 30px 60px -15px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255,255,255,0.08) inset"
+            : "0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.05) inset"
+        }}
+        transition={springBouncy}
       />
 
-      {/* Content */}
+      {/* Subtle gradient glow at top */}
+      <motion.div
+        className="absolute top-0 left-0 right-0 h-32 pointer-events-none"
+        style={{
+          background: "radial-gradient(ellipse 80% 50% at 50% 0%, rgba(99, 102, 241, 0.12) 0%, transparent 100%)",
+          borderRadius: "24px 24px 0 0"
+        }}
+        animate={{
+          opacity: isHovered ? 0.8 : 0.5
+        }}
+        transition={springSmooth}
+      />
+
+      {/* Content container */}
       <div className="relative z-10 flex flex-col h-full">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+        {/* Header - minimal like notch closed state */}
+        <motion.div
+          className="flex items-center justify-between px-4 py-3"
+          animate={{
+            paddingTop: isHovered ? 14 : 12,
+            paddingBottom: isHovered ? 14 : 12
+          }}
+          transition={springBouncy}
+        >
           <motion.div
-            className="flex items-center gap-2"
+            className="flex items-center gap-2.5"
             initial={{ x: -10, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
-            transition={{ delay: 0.1 }}
+            transition={{ ...springOpen, delay: 0.05 }}
           >
             <motion.div
-              animate={{ rotate: [0, 5, -5, 0] }}
-              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+              animate={{
+                scale: isHovered ? 1.1 : 1,
+                rotate: isHovered ? 3 : 0
+              }}
+              transition={springBouncy}
             >
-              <Logo size={22} />
+              <Logo size={20} />
             </motion.div>
-            <span className="text-white/90 font-semibold text-sm">Pulse</span>
+            <motion.span
+              className="text-white font-semibold text-sm tracking-tight"
+              animate={{ opacity: isHovered ? 1 : 0.9 }}
+            >
+              Pulse
+            </motion.span>
             <motion.div
-              className="w-2 h-2 rounded-full bg-green-400"
-              animate={{ scale: [1, 1.2, 1], opacity: [1, 0.7, 1] }}
-              transition={{ duration: 2, repeat: Infinity }}
+              className="w-1.5 h-1.5 rounded-full bg-green-400"
+              animate={{
+                scale: [1, 1.3, 1],
+                opacity: [0.8, 1, 0.8]
+              }}
+              transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
             />
           </motion.div>
+
           <motion.button
             onClick={handleClose}
-            className="p-1.5 rounded-lg text-white/40 hover:text-white/80 hover:bg-white/10 transition-all"
-            whileHover={{ scale: 1.1 }}
+            className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+            whileHover={{ scale: 1.15 }}
             whileTap={{ scale: 0.9 }}
+            transition={springBouncy}
           >
-            <X size={16} />
+            <X size={14} />
           </motion.button>
-        </div>
+        </motion.div>
 
-        {/* Main content area */}
+        {/* Separator line */}
+        <motion.div
+          className="mx-4 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"
+          initial={{ opacity: 0, scaleX: 0 }}
+          animate={{ opacity: 1, scaleX: 1 }}
+          transition={{ ...springOpen, delay: 0.1 }}
+        />
+
+        {/* Main content area with view transitions */}
         <div className="flex-1 overflow-hidden">
           <AnimatePresence mode="wait">
             {view === "home" && (
               <motion.div
                 key="home"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
+                {...viewTransition}
                 className="h-full p-4 flex flex-col"
               >
                 {/* Greeting */}
                 <motion.div
                   className="text-center mb-4"
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 15 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 }}
+                  transition={{ ...springSmooth, delay: 0.1 }}
                 >
-                  <h2 className="text-white/90 text-lg font-medium mb-1">
+                  <h2 className="text-white text-lg font-medium mb-1">
                     How can I help?
                   </h2>
                   <p className="text-white/50 text-sm">
@@ -327,126 +381,177 @@ export function WidgetApp() {
                   </p>
                 </motion.div>
 
-                {/* Quick actions */}
-                <div className="grid grid-cols-2 gap-2 flex-1">
+                {/* Quick actions - staggered animation */}
+                <div className="grid grid-cols-2 gap-2.5 flex-1">
                   {quickActions.map((action, i) => (
                     <motion.button
                       key={action.label}
                       onClick={action.action}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.1 * (i + 1) }}
-                      whileHover={{ scale: 1.02, backgroundColor: "rgba(255,255,255,0.1)" }}
-                      whileTap={{ scale: 0.98 }}
-                      className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl
-                               bg-white/5 border border-white/5 text-white/80 hover:text-white
+                      initial={{ opacity: 0, y: 20, scale: 0.9 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{ ...springOpen, delay: 0.15 + i * 0.05 }}
+                      whileHover={{
+                        scale: 1.03,
+                        backgroundColor: "rgba(255,255,255,0.08)",
+                        transition: springBouncy
+                      }}
+                      whileTap={{ scale: 0.97, transition: { duration: 0.1 } }}
+                      className="flex flex-col items-center justify-center gap-2 p-4 rounded-2xl
+                               bg-white/[0.03] border border-white/[0.06] text-white/80 hover:text-white
                                transition-colors"
                     >
-                      <span className="text-2xl">{action.icon}</span>
-                      <span className="text-xs text-center leading-tight">{action.label}</span>
+                      <motion.span
+                        className="text-2xl"
+                        whileHover={{ scale: 1.15, transition: springBouncy }}
+                      >
+                        {action.icon}
+                      </motion.span>
+                      <span className="text-xs text-center leading-tight font-medium">{action.label}</span>
                     </motion.button>
                   ))}
                 </div>
 
                 {/* API Key prompt if needed */}
-                {showApiKeyInput && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="mt-3 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20"
-                  >
-                    <p className="text-white/70 text-xs mb-2">Enter your Claude API key:</p>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={apiKeyInput}
-                        onChange={(e) => setApiKeyInput(e.target.value)}
-                        placeholder="sk-ant-..."
-                        className="flex-1 px-3 py-1.5 rounded-lg bg-white/10 text-white text-sm
-                                 placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
-                      />
-                      <button
-                        onClick={handleSaveApiKey}
-                        className="px-3 py-1.5 rounded-lg bg-indigo-500 text-white text-sm font-medium"
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </motion.div>
-                )}
+                <AnimatePresence>
+                  {showApiKeyInput && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 15, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={springSmooth}
+                      className="mt-3 p-3 rounded-2xl bg-indigo-500/10 border border-indigo-500/20"
+                    >
+                      <p className="text-white/70 text-xs mb-2 font-medium">Enter your Claude API key:</p>
+                      <div className="flex gap-2">
+                        <input
+                          type="password"
+                          value={apiKeyInput}
+                          onChange={(e) => setApiKeyInput(e.target.value)}
+                          placeholder="sk-ant-..."
+                          className="flex-1 px-3 py-2 rounded-xl bg-black/40 text-white text-sm
+                                   placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-indigo-500/40
+                                   border border-white/10"
+                        />
+                        <motion.button
+                          onClick={handleSaveApiKey}
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          className="px-4 py-2 rounded-xl bg-indigo-500 text-white text-sm font-semibold"
+                        >
+                          Save
+                        </motion.button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.div>
             )}
 
             {view === "chat" && (
-              <ChatView
-                messages={messages}
-                streamingContent={streamingContent}
-                isLoading={isLoading}
-                screenshot={currentScreenshot}
-                onClearScreenshot={() => setCurrentScreenshot(null)}
-              />
+              <motion.div
+                key="chat"
+                {...viewTransition}
+                className="h-full"
+              >
+                <ChatView
+                  messages={messages}
+                  streamingContent={streamingContent}
+                  isLoading={isLoading}
+                  screenshot={currentScreenshot}
+                  onClearScreenshot={() => setCurrentScreenshot(null)}
+                />
+              </motion.div>
             )}
 
             {view === "voice" && (
-              <VoiceView isListening={isListening} transcript={inputValue} />
+              <motion.div
+                key="voice"
+                {...viewTransition}
+                className="h-full"
+              >
+                <VoiceView isListening={isListening} transcript={inputValue} />
+              </motion.div>
             )}
           </AnimatePresence>
         </div>
 
         {/* Input area */}
-        <div className="p-3 border-t border-white/5">
+        <motion.div
+          className="p-3 pt-2"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ ...springOpen, delay: 0.2 }}
+        >
+          {/* Separator */}
+          <div className="mx-1 mb-2 h-px bg-gradient-to-r from-transparent via-white/8 to-transparent" />
+
           <div className="flex items-center gap-2">
             <motion.button
               onClick={handleCapture}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/50 hover:text-white/80 transition-colors"
+              whileHover={{ scale: 1.12, backgroundColor: "rgba(255,255,255,0.1)" }}
+              whileTap={{ scale: 0.92 }}
+              transition={springBouncy}
+              className="p-2.5 rounded-xl bg-white/[0.04] text-white/50 hover:text-white transition-colors"
               title="Screenshot"
             >
-              <Camera size={18} />
+              <Camera size={17} />
             </motion.button>
             <motion.button
               onClick={isListening ? stopListening : startListening}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              className={`p-2 rounded-lg transition-colors ${
+              whileHover={{ scale: 1.12 }}
+              whileTap={{ scale: 0.92 }}
+              transition={springBouncy}
+              className={`p-2.5 rounded-xl transition-all ${
                 isListening
-                  ? "bg-red-500/20 text-red-400"
-                  : "bg-white/5 hover:bg-white/10 text-white/50 hover:text-white/80"
+                  ? "bg-red-500/20 text-red-400 ring-2 ring-red-500/30"
+                  : "bg-white/[0.04] text-white/50 hover:text-white hover:bg-white/10"
               }`}
               title="Voice"
             >
-              <Mic size={18} />
+              <Mic size={17} />
             </motion.button>
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              onFocus={() => view === "home" && setView("chat")}
-              placeholder={isListening ? "Listening..." : "Ask anything..."}
-              className="flex-1 bg-white/5 text-white placeholder-white/30 rounded-lg px-3 py-2 text-sm
-                       focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:bg-white/10 transition-all"
-            />
+            <motion.div
+              className="flex-1 relative"
+              animate={{ scale: isHovered ? 1.01 : 1 }}
+              transition={springSmooth}
+            >
+              <input
+                ref={inputRef}
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                onFocus={() => view === "home" && setView("chat")}
+                placeholder={isListening ? "Listening..." : "Ask anything..."}
+                className="w-full bg-white/[0.04] text-white placeholder-white/30 rounded-xl px-4 py-2.5 text-sm
+                         focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:bg-white/[0.06]
+                         transition-all border border-white/[0.06]"
+              />
+            </motion.div>
             <motion.button
               onClick={handleSend}
               disabled={!inputValue.trim() || isLoading}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              className={`p-2 rounded-lg transition-all ${
+              whileHover={{ scale: inputValue.trim() && !isLoading ? 1.08 : 1 }}
+              whileTap={{ scale: inputValue.trim() && !isLoading ? 0.92 : 1 }}
+              transition={springBouncy}
+              className={`p-2.5 rounded-xl transition-all ${
                 inputValue.trim() && !isLoading
-                  ? "bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/25"
-                  : "bg-white/5 text-white/30"
+                  ? "bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-lg shadow-indigo-500/25"
+                  : "bg-white/[0.04] text-white/25"
               }`}
             >
-              <Send size={18} />
+              <Send size={17} />
             </motion.button>
           </div>
-          <p className="text-white/30 text-[10px] mt-2 text-center">
+          <motion.p
+            className="text-white/25 text-[10px] mt-2 text-center font-medium tracking-wide"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4 }}
+          >
             ⌘⇧G toggle • ⌘⇧V voice • ⌘⇧S screenshot • ESC close
-          </p>
-        </div>
+          </motion.p>
+        </motion.div>
       </div>
     </motion.div>
   )
@@ -472,52 +577,62 @@ function ChatView({
   }, [messages, streamingContent])
 
   return (
-    <motion.div
-      key="chat"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="h-full flex flex-col"
-    >
+    <div className="h-full flex flex-col">
       {/* Screenshot preview */}
-      {screenshot && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          className="px-3 py-2 border-b border-white/5"
-        >
-          <div className="flex items-center gap-2">
-            <img src={screenshot} alt="Screenshot" className="h-10 rounded opacity-70" />
-            <span className="text-white/50 text-xs flex-1">Screenshot attached</span>
-            <button onClick={onClearScreenshot} className="text-white/40 hover:text-white/70">
-              <X size={14} />
-            </button>
-          </div>
-        </motion.div>
-      )}
+      <AnimatePresence>
+        {screenshot && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={springSmooth}
+            className="px-3 py-2 border-b border-white/5"
+          >
+            <div className="flex items-center gap-2">
+              <img src={screenshot} alt="Screenshot" className="h-10 rounded-lg opacity-70" />
+              <span className="text-white/50 text-xs flex-1">Screenshot attached</span>
+              <motion.button
+                onClick={onClearScreenshot}
+                className="text-white/40 hover:text-white/70 p-1"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <X size={14} />
+              </motion.button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin scrollbar-thumb-white/10">
         {messages.length === 0 && !streamingContent && (
-          <div className="text-center text-white/40 py-8">
+          <motion.div
+            className="text-center text-white/40 py-8"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={springSmooth}
+          >
             <Sparkles size={24} className="mx-auto mb-2 opacity-50" />
             <p className="text-sm">Start a conversation</p>
-          </div>
+          </motion.div>
         )}
 
         {messages.map((msg, i) => (
           <motion.div
             key={msg.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
+            initial={{ opacity: 0, y: 15, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ ...springOpen, delay: Math.min(i * 0.03, 0.15) }}
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
-            <div
-              className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
+            <motion.div
+              whileHover={{ scale: 1.01 }}
+              transition={springBouncy}
+              className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm ${
                 msg.role === "user"
-                  ? "bg-gradient-to-r from-indigo-500/40 to-purple-500/40 text-white"
-                  : "bg-white/5 text-white/90"
+                  ? "bg-gradient-to-br from-indigo-500/30 to-purple-500/30 text-white border border-indigo-500/20"
+                  : "bg-white/[0.04] text-white/90 border border-white/[0.06]"
               }`}
             >
               {msg.role === "assistant" ? (
@@ -525,111 +640,140 @@ function ChatView({
               ) : (
                 <p>{msg.content}</p>
               )}
-            </div>
+            </motion.div>
           </motion.div>
         ))}
 
         {/* Streaming response */}
-        {streamingContent && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex justify-start"
-          >
-            <div className="max-w-[85%] rounded-2xl px-3 py-2 text-sm bg-white/5 text-white/90">
-              <MarkdownRenderer content={streamingContent} />
-              <motion.span
-                animate={{ opacity: [1, 0.3, 1] }}
-                transition={{ duration: 0.8, repeat: Infinity }}
-                className="inline-block w-2 h-4 bg-indigo-400 ml-1"
-              />
-            </div>
-          </motion.div>
-        )}
+        <AnimatePresence>
+          {streamingContent && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={springSmooth}
+              className="flex justify-start"
+            >
+              <div className="max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm bg-white/[0.04] text-white/90 border border-white/[0.06]">
+                <MarkdownRenderer content={streamingContent} />
+                <motion.span
+                  animate={{ opacity: [1, 0.2, 1] }}
+                  transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut" }}
+                  className="inline-block w-1.5 h-4 bg-indigo-400 rounded-sm ml-0.5 -mb-0.5"
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Loading indicator */}
-        {isLoading && !streamingContent && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex justify-start"
-          >
-            <div className="rounded-2xl px-4 py-3 bg-white/5">
-              <div className="flex gap-1">
-                {[0, 1, 2].map((i) => (
-                  <motion.div
-                    key={i}
-                    className="w-2 h-2 rounded-full bg-indigo-400"
-                    animate={{ y: [0, -6, 0], opacity: [0.5, 1, 0.5] }}
-                    transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
-                  />
-                ))}
+        <AnimatePresence>
+          {isLoading && !streamingContent && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={springSmooth}
+              className="flex justify-start"
+            >
+              <div className="rounded-2xl px-4 py-3 bg-white/[0.04] border border-white/[0.06]">
+                <div className="flex gap-1.5">
+                  {[0, 1, 2].map((i) => (
+                    <motion.div
+                      key={i}
+                      className="w-2 h-2 rounded-full bg-indigo-400"
+                      animate={{
+                        y: [0, -8, 0],
+                        opacity: [0.4, 1, 0.4]
+                      }}
+                      transition={{
+                        duration: 0.6,
+                        repeat: Infinity,
+                        delay: i * 0.12,
+                        ease: "easeInOut"
+                      }}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          </motion.div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div ref={messagesEndRef} />
       </div>
-    </motion.div>
+    </div>
   )
 }
 
 function VoiceView({ isListening, transcript }: { isListening: boolean; transcript: string }) {
   return (
-    <motion.div
-      key="voice"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="h-full flex flex-col items-center justify-center p-6"
-    >
+    <div className="h-full flex flex-col items-center justify-center p-6">
       {/* Animated rings */}
       <div className="relative mb-6">
         {[1, 2, 3].map((ring) => (
           <motion.div
             key={ring}
-            className="absolute inset-0 rounded-full border-2 border-indigo-500/30"
-            style={{ margin: -ring * 15 }}
+            className="absolute rounded-full border-2 border-indigo-500/20"
+            style={{
+              inset: -ring * 18,
+            }}
             animate={isListening ? {
-              scale: [1, 1.2, 1],
-              opacity: [0.3, 0.1, 0.3]
-            } : {}}
+              scale: [1, 1.15, 1],
+              opacity: [0.25, 0.08, 0.25]
+            } : { scale: 1, opacity: 0.15 }}
             transition={{
-              duration: 1.5,
+              duration: 1.8,
               repeat: Infinity,
-              delay: ring * 0.2
+              delay: ring * 0.25,
+              ease: "easeInOut"
             }}
           />
         ))}
         <motion.div
           className="relative w-20 h-20 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600
-                     flex items-center justify-center shadow-lg shadow-indigo-500/30"
-          animate={isListening ? { scale: [1, 1.05, 1] } : {}}
-          transition={{ duration: 0.5, repeat: Infinity }}
+                     flex items-center justify-center shadow-xl shadow-indigo-500/30"
+          animate={isListening ? {
+            scale: [1, 1.08, 1],
+            boxShadow: [
+              "0 20px 25px -5px rgba(99, 102, 241, 0.3)",
+              "0 25px 35px -5px rgba(99, 102, 241, 0.4)",
+              "0 20px 25px -5px rgba(99, 102, 241, 0.3)"
+            ]
+          } : {}}
+          transition={{
+            duration: 0.8,
+            repeat: Infinity,
+            ease: "easeInOut"
+          }}
         >
           <Mic size={32} className="text-white" />
         </motion.div>
       </div>
 
       <motion.p
-        animate={{ opacity: [0.5, 1, 0.5] }}
-        transition={{ duration: 2, repeat: Infinity }}
-        className="text-white/60 text-sm mb-4"
+        animate={{ opacity: [0.4, 0.8, 0.4] }}
+        transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+        className="text-white/60 text-sm mb-4 font-medium"
       >
         {isListening ? "Listening..." : "Click the mic to speak"}
       </motion.p>
 
-      {transcript && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="w-full p-3 rounded-xl bg-white/5 text-white/80 text-sm text-center"
-        >
-          "{transcript}"
-        </motion.div>
-      )}
-    </motion.div>
+      <AnimatePresence>
+        {transcript && (
+          <motion.div
+            initial={{ opacity: 0, y: 15, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            transition={springSmooth}
+            className="w-full p-4 rounded-2xl bg-white/[0.04] border border-white/[0.06]
+                     text-white/80 text-sm text-center italic"
+          >
+            "{transcript}"
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   )
 }
 
