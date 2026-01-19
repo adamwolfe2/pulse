@@ -1,16 +1,33 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Mic, Send, Camera, X, Sparkles } from "lucide-react"
+import { Mic, Send, Camera, X, Sparkles, History, Settings, Clipboard, ChevronDown } from "lucide-react"
 import { usePulseStore, initializeApiKey } from "./stores/pulseStore"
 import { streamChat } from "./lib/claude"
 import { MarkdownRenderer } from "./components/MarkdownRenderer"
 import { Logo } from "./components/Logo"
+import { CommandPalette } from "./components/CommandPalette"
+import { ModelSelector } from "./components/ModelSelector"
+import { SettingsWindow } from "./components/Settings/SettingsWindow"
+import { OnboardingFlow } from "./components/Onboarding/OnboardingFlow"
+import { ConversationSidebar } from "./components/ConversationSidebar"
+import {
+  saveConversation,
+  getConversations,
+  createConversation,
+  type Conversation
+} from "./lib/persistence"
+import { parseCommand, executeCommand, type Command } from "./lib/commands"
+import { getTimeContext, getContextualQuickActions, trackInteraction } from "./lib/context"
+import { readClipboard, formatClipboardForContext } from "./lib/clipboard"
+import { getStoredModelId, setStoredModelId, getDefaultModel } from "./lib/models"
+import { initializeTrial, getLicenseStatus, canPerformAction } from "./lib/licensing"
 
 interface Message {
   id: string
   role: "user" | "assistant"
   content: string
   screenshot?: string
+  timestamp?: number
 }
 
 type WidgetView = "home" | "chat" | "voice"
@@ -70,6 +87,16 @@ export function WidgetApp() {
   const [apiKeyInput, setApiKeyInput] = useState("")
   const [isHovered, setIsHovered] = useState(false)
 
+  // New feature states
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [showCommandPalette, setShowCommandPalette] = useState(false)
+  const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null)
+  const [selectedModelId, setSelectedModelId] = useState(getStoredModelId())
+  const [clipboardContent, setClipboardContent] = useState<string | null>(null)
+  const [contextGreeting, setContextGreeting] = useState("")
+
   const inputRef = useRef<HTMLInputElement>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const { settings, updateSettings } = usePulseStore()
@@ -80,12 +107,26 @@ export function WidgetApp() {
   useEffect(() => {
     async function initialize() {
       try {
+        // Initialize licensing/trial
+        initializeTrial()
+
+        // Load API key
         const apiKey = await initializeApiKey()
         if (apiKey) {
           updateSettings({ apiKey })
         }
+
+        // Check if onboarding is needed
+        const onboardingComplete = localStorage.getItem("pulse_onboarding_complete")
+        if (!onboardingComplete) {
+          setShowOnboarding(true)
+        }
+
+        // Get context-aware greeting
+        const context = getTimeContext()
+        setContextGreeting(context.greeting)
       } catch (e) {
-        console.log("API key init skipped")
+        console.log("Initialization error:", e)
       }
       setIsInitialized(true)
     }
@@ -151,20 +192,41 @@ export function WidgetApp() {
     const text = inputValue.trim()
     if (!text || isLoading) return
 
+    // Check if it's a command
+    const { command, args } = parseCommand(text)
+    if (command) {
+      handleCommand(command, args)
+      return
+    }
+
+    // Check licensing limits
+    const canSend = canPerformAction("send_message")
+    if (!canSend.allowed) {
+      setMessages((prev) => [
+        ...prev,
+        { id: `msg-${Date.now()}-limit`, role: "assistant", content: canSend.reason || "Message limit reached." }
+      ])
+      return
+    }
+
     stopListening()
     setView("chat")
+    trackInteraction()
 
     const userMessage: Message = {
       id: `msg-${Date.now()}`,
       role: "user",
       content: text,
-      screenshot: currentScreenshot || undefined
+      screenshot: currentScreenshot || undefined,
+      timestamp: Date.now()
     }
 
-    setMessages((prev) => [...prev, userMessage])
+    const newMessages = [...messages, userMessage]
+    setMessages(newMessages)
     setInputValue("")
     setIsLoading(true)
     setStreamingContent("")
+    setShowCommandPalette(false)
 
     if (!settings.apiKey) {
       setMessages((prev) => [
@@ -199,12 +261,30 @@ export function WidgetApp() {
         }
       )
 
-      setMessages((prev) => [
-        ...prev,
-        { id: `msg-${Date.now()}-resp`, role: "assistant", content: fullResponse }
-      ])
+      const assistantMessage: Message = {
+        id: `msg-${Date.now()}-resp`,
+        role: "assistant",
+        content: fullResponse,
+        timestamp: Date.now()
+      }
+
+      const finalMessages = [...newMessages, assistantMessage]
+      setMessages(finalMessages)
       setStreamingContent("")
       setCurrentScreenshot(null)
+
+      // Save conversation
+      const conv = currentConversation || createConversation([], selectedModelId)
+      conv.messages = finalMessages.map(m => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        screenshot: m.screenshot,
+        timestamp: m.timestamp || Date.now()
+      }))
+      conv.updatedAt = Date.now()
+      saveConversation(conv)
+      setCurrentConversation(conv)
     } catch (error) {
       console.error("Chat error:", error)
       setMessages((prev) => [
@@ -238,12 +318,121 @@ export function WidgetApp() {
     window.pulse?.hideWidget?.()
   }
 
-  const quickActions = [
-    { label: "What's on my screen?", icon: "👀", action: () => handleCapture() },
-    { label: "Help me write something", icon: "✍️", action: () => { setInputValue("Help me write "); setView("chat"); } },
-    { label: "Explain this to me", icon: "💡", action: () => { setInputValue("Explain "); setView("chat"); } },
-    { label: "Voice mode", icon: "🎤", action: startListening }
-  ]
+  // Handle command execution
+  const handleCommand = useCallback((command: Command, args: string) => {
+    const result = executeCommand(command, args)
+    setShowCommandPalette(false)
+
+    switch (result.type) {
+      case "action":
+        switch (result.value) {
+          case "CLEAR_CHAT":
+            setMessages([])
+            setCurrentConversation(null)
+            break
+          case "NEW_CONVERSATION":
+            setMessages([])
+            setCurrentConversation(null)
+            setView("home")
+            break
+          case "SHOW_HISTORY":
+            setShowHistory(true)
+            break
+          case "OPEN_SETTINGS":
+            setShowSettings(true)
+            break
+          case "CAPTURE_SCREEN":
+            handleCapture()
+            break
+          case "VOICE_MODE":
+            startListening()
+            break
+          case "INCLUDE_CLIPBOARD":
+            readClipboard().then(content => {
+              const formatted = formatClipboardForContext(content)
+              setClipboardContent(formatted)
+              setInputValue(prev => prev + " " + formatted)
+            })
+            break
+        }
+        if (result.clearInput) setInputValue("")
+        break
+      case "prompt":
+        setInputValue(result.value)
+        setView("chat")
+        inputRef.current?.focus()
+        break
+      case "insert":
+        setInputValue(prev => prev + " " + result.value)
+        break
+    }
+  }, [startListening])
+
+  // Handle input change with command detection
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    setInputValue(value)
+
+    // Show command palette for /, @, or # prefixes
+    if (value.startsWith("/") || value.startsWith("@") || value.startsWith("#")) {
+      setShowCommandPalette(true)
+    } else {
+      setShowCommandPalette(false)
+    }
+  }
+
+  // Handle model change
+  const handleModelChange = (modelId: string) => {
+    setSelectedModelId(modelId)
+    setStoredModelId(modelId)
+  }
+
+  // Handle clipboard paste
+  const handlePasteClipboard = async () => {
+    const content = await readClipboard()
+    const formatted = formatClipboardForContext(content)
+    setClipboardContent(formatted)
+    if (content.type !== "empty") {
+      setInputValue(prev => prev ? prev + "\n\n" + formatted : formatted)
+      setView("chat")
+    }
+  }
+
+  // Get context-aware quick actions
+  const quickActions = getContextualQuickActions().map(action => ({
+    ...action,
+    action: action.prompt
+      ? () => { setInputValue(action.prompt); setView("chat"); }
+      : action.label.includes("screen")
+        ? () => handleCapture()
+        : action.label.includes("Voice")
+          ? startListening
+          : () => {}
+  }))
+
+  // Handle conversation selection from history
+  const handleSelectConversation = (convId: string) => {
+    const conversations = getConversations()
+    const conv = conversations.find(c => c.id === convId)
+    if (conv) {
+      setCurrentConversation(conv)
+      setMessages(conv.messages.map(m => ({
+        id: m.id,
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        screenshot: m.screenshot,
+        timestamp: m.timestamp
+      })))
+      setView("chat")
+    }
+  }
+
+  // Handle new conversation
+  const handleNewConversation = () => {
+    setMessages([])
+    setCurrentConversation(null)
+    setView("home")
+  }
 
   if (!isInitialized) {
     return (
@@ -273,7 +462,24 @@ export function WidgetApp() {
     )
   }
 
+  // Show onboarding if needed
+  if (showOnboarding) {
+    return <OnboardingFlow onComplete={() => setShowOnboarding(false)} />
+  }
+
   return (
+    <>
+      {/* Settings Modal */}
+      <SettingsWindow isOpen={showSettings} onClose={() => setShowSettings(false)} />
+
+      {/* Conversation History Sidebar */}
+      <ConversationSidebar
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        currentConversationId={currentConversation?.id || null}
+        onSelectConversation={handleSelectConversation}
+        onNewConversation={handleNewConversation}
+      />
     <motion.div
       style={{
         width: "100%",
@@ -352,15 +558,49 @@ export function WidgetApp() {
             />
           </motion.div>
 
-          <motion.button
-            onClick={handleClose}
-            className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-colors"
-            whileHover={{ scale: 1.15 }}
-            whileTap={{ scale: 0.9 }}
-            transition={springBouncy}
-          >
-            <X size={14} />
-          </motion.button>
+          <div className="flex items-center gap-1">
+            {/* Model selector - compact */}
+            <ModelSelector
+              selectedModelId={selectedModelId}
+              onSelectModel={handleModelChange}
+              compact
+            />
+
+            {/* History button */}
+            <motion.button
+              onClick={() => setShowHistory(true)}
+              className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+              whileHover={{ scale: 1.15 }}
+              whileTap={{ scale: 0.9 }}
+              transition={springBouncy}
+              title="Conversation History"
+            >
+              <History size={14} />
+            </motion.button>
+
+            {/* Settings button */}
+            <motion.button
+              onClick={() => setShowSettings(true)}
+              className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+              whileHover={{ scale: 1.15 }}
+              whileTap={{ scale: 0.9 }}
+              transition={springBouncy}
+              title="Settings"
+            >
+              <Settings size={14} />
+            </motion.button>
+
+            {/* Close button */}
+            <motion.button
+              onClick={handleClose}
+              className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+              whileHover={{ scale: 1.15 }}
+              whileTap={{ scale: 0.9 }}
+              transition={springBouncy}
+            >
+              <X size={14} />
+            </motion.button>
+          </div>
         </motion.div>
 
         {/* Separator line */}
@@ -388,10 +628,10 @@ export function WidgetApp() {
                   transition={{ ...springSmooth, delay: 0.1 }}
                 >
                   <h2 className="text-white text-lg font-medium mb-1">
-                    How can I help?
+                    {contextGreeting || "How can I help?"}
                   </h2>
                   <p className="text-white/50 text-sm">
-                    Ask me anything or try a quick action
+                    Type / for commands, @ for context, # for formatting
                   </p>
                 </motion.div>
 
@@ -491,11 +731,19 @@ export function WidgetApp() {
 
         {/* Input area */}
         <motion.div
-          className="p-3 pt-2"
+          className="p-3 pt-2 relative"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ ...springOpen, delay: 0.2 }}
         >
+          {/* Command Palette */}
+          <CommandPalette
+            input={inputValue}
+            isVisible={showCommandPalette}
+            onSelect={handleCommand}
+            onClose={() => setShowCommandPalette(false)}
+          />
+
           {/* Separator */}
           <div className="mx-1 mb-2 h-px bg-gradient-to-r from-transparent via-white/8 to-transparent" />
 
@@ -524,6 +772,16 @@ export function WidgetApp() {
             >
               <Mic size={17} />
             </motion.button>
+            <motion.button
+              onClick={handlePasteClipboard}
+              whileHover={{ scale: 1.12 }}
+              whileTap={{ scale: 0.92 }}
+              transition={springBouncy}
+              className="p-2.5 rounded-xl bg-white/[0.04] text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+              title="Paste from Clipboard"
+            >
+              <Clipboard size={17} />
+            </motion.button>
             <motion.div
               className="flex-1 relative"
               animate={{ scale: isHovered ? 1.01 : 1 }}
@@ -533,10 +791,13 @@ export function WidgetApp() {
                 ref={inputRef}
                 type="text"
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                onChange={handleInputChange}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !showCommandPalette) handleSend()
+                  if (e.key === "Escape") setShowCommandPalette(false)
+                }}
                 onFocus={() => view === "home" && setView("chat")}
-                placeholder={isListening ? "Listening..." : "Ask anything..."}
+                placeholder={isListening ? "Listening..." : "Ask anything... (/ for commands)"}
                 className="w-full bg-white/[0.04] text-white placeholder-white/30 rounded-xl px-4 py-2.5 text-sm
                          focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:bg-white/[0.06]
                          transition-all border border-white/[0.06]"
@@ -563,11 +824,12 @@ export function WidgetApp() {
             animate={{ opacity: 1 }}
             transition={{ delay: 0.4 }}
           >
-            ⌘⇧G toggle • ⌘⇧V voice • ⌘⇧S screenshot • ESC close
+            ⌘⇧G toggle • /help commands • ⌘⇧S screenshot
           </motion.p>
         </motion.div>
       </div>
     </motion.div>
+    </>
   )
 }
 
