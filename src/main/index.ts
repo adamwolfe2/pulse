@@ -40,7 +40,9 @@ let mouseEdgeCheckInterval: NodeJS.Timeout | null = null
 // Widget dimensions - compact like Nook/Atoll
 const WIDGET_WIDTH = 420
 const WIDGET_HEIGHT = 380
+const WIDGET_HEIGHT_COMPACT = 72
 const WIDGET_MARGIN = 8
+let isCompactMode = false
 
 // Window position memory
 const SETTINGS_FILE = path.join(app.getPath("userData"), "pulse-settings.json")
@@ -182,7 +184,7 @@ function createWidgetWindow() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, "../../assets/Pulselogo.png")
+  const iconPath = path.join(__dirname, "../../assets/icon.png")
   let trayIcon: nativeImage
 
   try {
@@ -210,12 +212,23 @@ function createTray() {
 function updateTrayMenu() {
   if (!tray) return
 
+  const appVersion = app.getVersion()
+
   const contextMenu = Menu.buildFromTemplate([
     {
       label: "Open Pulse",
       accelerator: "CommandOrControl+Shift+G",
       click: () => showWidget()
     },
+    {
+      label: "New Conversation",
+      accelerator: "CommandOrControl+N",
+      click: () => {
+        showWidget()
+        widgetWindow?.webContents.send("new-conversation")
+      }
+    },
+    { type: "separator" },
     {
       label: "Voice Mode",
       accelerator: "CommandOrControl+Shift+V",
@@ -225,6 +238,14 @@ function updateTrayMenu() {
       label: "Screenshot & Ask",
       accelerator: "CommandOrControl+Shift+S",
       click: () => captureAndAsk()
+    },
+    { type: "separator" },
+    {
+      label: "Conversation History",
+      click: () => {
+        showWidget()
+        widgetWindow?.webContents.send("open-history")
+      }
     },
     { type: "separator" },
     {
@@ -239,12 +260,50 @@ function updateTrayMenu() {
       checked: mouseEdgeCheckInterval !== null,
       click: (menuItem) => toggleEdgeActivation(menuItem.checked)
     },
+    {
+      label: "Launch at Login",
+      type: "checkbox",
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (menuItem) => {
+        app.setLoginItemSettings({
+          openAtLogin: menuItem.checked,
+          openAsHidden: true
+        })
+      }
+    },
     { type: "separator" },
     {
       label: "Settings...",
+      accelerator: "CommandOrControl+,",
       click: () => {
         showWidget()
         widgetWindow?.webContents.send("open-settings")
+      }
+    },
+    {
+      label: "Keyboard Shortcuts",
+      click: () => {
+        showWidget()
+        widgetWindow?.webContents.send("open-shortcuts")
+      }
+    },
+    { type: "separator" },
+    {
+      label: "Check for Updates",
+      click: () => {
+        autoUpdater.checkForUpdatesAndNotify()
+      }
+    },
+    {
+      label: `About Pulse v${appVersion}`,
+      click: () => {
+        dialog.showMessageBox({
+          type: "info",
+          title: "About Pulse",
+          message: "Pulse - AI Desktop Companion",
+          detail: `Version ${appVersion}\n\nYour intelligent AI assistant, always just a shortcut away.\n\n© 2024 Pulse`,
+          buttons: ["OK"]
+        })
       }
     },
     { type: "separator" },
@@ -449,6 +508,27 @@ function setupIpcHandlers() {
 
   ipcMain.on("set-edge-activation", (_, enabled: boolean) => {
     toggleEdgeActivation(enabled)
+  })
+
+  // Compact/expanded mode handler
+  ipcMain.on("set-widget-mode", (_, mode: "compact" | "expanded") => {
+    if (!widgetWindow) return
+
+    isCompactMode = mode === "compact"
+    const newHeight = isCompactMode ? WIDGET_HEIGHT_COMPACT : WIDGET_HEIGHT
+
+    // Get current position to maintain x position
+    const [x, y] = widgetWindow.getPosition()
+
+    // Animate height change
+    widgetWindow.setSize(WIDGET_WIDTH, newHeight, true)
+
+    // Notify renderer of mode change
+    widgetWindow.webContents.send("widget-mode-changed", { mode })
+  })
+
+  ipcMain.handle("get-widget-mode", () => {
+    return isCompactMode ? "compact" : "expanded"
   })
 }
 

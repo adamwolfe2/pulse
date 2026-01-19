@@ -65,7 +65,7 @@
         "dmg",
         "zip"
       ],
-      "icon": "assets/Pulselogo.png",
+      "icon": "assets/icon.png",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
@@ -76,14 +76,14 @@
         "nsis",
         "portable"
       ],
-      "icon": "assets/Pulselogo.png"
+      "icon": "assets/icon.png"
     },
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "icon": "assets/Pulselogo.png",
+      "icon": "assets/icon.png",
       "category": "Utility"
     },
     "publish": {

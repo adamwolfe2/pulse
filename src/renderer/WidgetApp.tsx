@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Mic, Send, Camera, X, Sparkles, History, Settings, Clipboard, ChevronDown } from "lucide-react"
+import { Mic, Send, Camera, X, Sparkles, History, Settings, Clipboard, ChevronDown, ChevronUp, Minimize2, Maximize2 } from "lucide-react"
 import { usePulseStore, initializeApiKey } from "./stores/pulseStore"
 import { streamChat } from "./lib/claude"
 import { MarkdownRenderer } from "./components/MarkdownRenderer"
@@ -10,6 +10,7 @@ import { ModelSelector } from "./components/ModelSelector"
 import { SettingsWindow } from "./components/Settings/SettingsWindow"
 import { OnboardingFlow } from "./components/Onboarding/OnboardingFlow"
 import { ConversationSidebar } from "./components/ConversationSidebar"
+import { KeyboardShortcutsPanel } from "./components/KeyboardShortcutsPanel"
 import {
   saveConversation,
   getConversations,
@@ -91,11 +92,13 @@ export function WidgetApp() {
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null)
   const [selectedModelId, setSelectedModelId] = useState(getStoredModelId())
   const [clipboardContent, setClipboardContent] = useState<string | null>(null)
   const [contextGreeting, setContextGreeting] = useState("")
+  const [isCompactMode, setIsCompactMode] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
@@ -152,10 +155,38 @@ export function WidgetApp() {
       setView("chat")
     })
 
+    // Tray menu actions
+    window.pulse?.onOpenSettings?.(() => {
+      setShowSettings(true)
+    })
+
+    window.pulse?.onOpenHistory?.(() => {
+      setShowHistory(true)
+    })
+
+    window.pulse?.onOpenShortcuts?.(() => {
+      setShowShortcuts(true)
+    })
+
+    window.pulse?.onNewConversation?.(() => {
+      handleNewConversation()
+    })
+
+    window.pulse?.onWidgetModeChanged?.((data) => {
+      setIsCompactMode(data.mode === "compact")
+    })
+
     return () => {
       window.pulse?.removeAllListeners?.()
     }
   }, [])
+
+  // Toggle compact/expanded mode
+  const toggleCompactMode = useCallback(() => {
+    const newMode = isCompactMode ? "expanded" : "compact"
+    window.pulse?.setWidgetMode?.(newMode)
+    setIsCompactMode(!isCompactMode)
+  }, [isCompactMode])
 
   const startListening = useCallback(() => {
     if (!("webkitSpeechRecognition" in window)) return
@@ -472,6 +503,9 @@ export function WidgetApp() {
       {/* Settings Modal */}
       <SettingsWindow isOpen={showSettings} onClose={() => setShowSettings(false)} />
 
+      {/* Keyboard Shortcuts Panel */}
+      <KeyboardShortcutsPanel isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+
       {/* Conversation History Sidebar */}
       <ConversationSidebar
         isOpen={showHistory}
@@ -559,35 +593,53 @@ export function WidgetApp() {
           </motion.div>
 
           <div className="flex items-center gap-1">
-            {/* Model selector - compact */}
-            <ModelSelector
-              selectedModelId={selectedModelId}
-              onSelectModel={handleModelChange}
-              compact
-            />
+            {/* Model selector - compact (hidden in compact mode) */}
+            {!isCompactMode && (
+              <ModelSelector
+                selectedModelId={selectedModelId}
+                onSelectModel={handleModelChange}
+                compact
+              />
+            )}
 
-            {/* History button */}
-            <motion.button
-              onClick={() => setShowHistory(true)}
-              className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-colors"
-              whileHover={{ scale: 1.15 }}
-              whileTap={{ scale: 0.9 }}
-              transition={springBouncy}
-              title="Conversation History"
-            >
-              <History size={14} />
-            </motion.button>
+            {/* History button (hidden in compact mode) */}
+            {!isCompactMode && (
+              <motion.button
+                onClick={() => setShowHistory(true)}
+                className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+                whileHover={{ scale: 1.15 }}
+                whileTap={{ scale: 0.9 }}
+                transition={springBouncy}
+                title="Conversation History"
+              >
+                <History size={14} />
+              </motion.button>
+            )}
 
             {/* Settings button */}
+            {!isCompactMode && (
+              <motion.button
+                onClick={() => setShowSettings(true)}
+                className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+                whileHover={{ scale: 1.15 }}
+                whileTap={{ scale: 0.9 }}
+                transition={springBouncy}
+                title="Settings"
+              >
+                <Settings size={14} />
+              </motion.button>
+            )}
+
+            {/* Compact/Expand toggle */}
             <motion.button
-              onClick={() => setShowSettings(true)}
+              onClick={toggleCompactMode}
               className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-colors"
               whileHover={{ scale: 1.15 }}
               whileTap={{ scale: 0.9 }}
               transition={springBouncy}
-              title="Settings"
+              title={isCompactMode ? "Expand" : "Compact"}
             >
-              <Settings size={14} />
+              {isCompactMode ? <Maximize2 size={14} /> : <Minimize2 size={14} />}
             </motion.button>
 
             {/* Close button */}
@@ -603,16 +655,18 @@ export function WidgetApp() {
           </div>
         </motion.div>
 
-        {/* Separator line */}
-        <motion.div
-          className="mx-4 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"
-          initial={{ opacity: 0, scaleX: 0 }}
-          animate={{ opacity: 1, scaleX: 1 }}
-          transition={{ ...springOpen, delay: 0.1 }}
-        />
+        {/* Separator line (hidden in compact mode) */}
+        {!isCompactMode && (
+          <motion.div
+            className="mx-4 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"
+            initial={{ opacity: 0, scaleX: 0 }}
+            animate={{ opacity: 1, scaleX: 1 }}
+            transition={{ ...springOpen, delay: 0.1 }}
+          />
+        )}
 
-        {/* Main content area with view transitions */}
-        <div className="flex-1 overflow-hidden">
+        {/* Main content area with view transitions (hidden in compact mode) */}
+        {!isCompactMode && <div className="flex-1 overflow-hidden">
           <AnimatePresence mode="wait">
             {view === "home" && (
               <motion.div
@@ -727,61 +781,74 @@ export function WidgetApp() {
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
+        </div>}
 
         {/* Input area */}
         <motion.div
-          className="p-3 pt-2 relative"
+          className={`relative ${isCompactMode ? "p-2" : "p-3 pt-2"}`}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ ...springOpen, delay: 0.2 }}
         >
           {/* Command Palette */}
-          <CommandPalette
-            input={inputValue}
-            isVisible={showCommandPalette}
-            onSelect={handleCommand}
-            onClose={() => setShowCommandPalette(false)}
-          />
+          {!isCompactMode && (
+            <CommandPalette
+              input={inputValue}
+              isVisible={showCommandPalette}
+              onSelect={handleCommand}
+              onClose={() => setShowCommandPalette(false)}
+            />
+          )}
 
-          {/* Separator */}
-          <div className="mx-1 mb-2 h-px bg-gradient-to-r from-transparent via-white/8 to-transparent" />
+          {/* Separator (hidden in compact mode) */}
+          {!isCompactMode && (
+            <div className="mx-1 mb-2 h-px bg-gradient-to-r from-transparent via-white/8 to-transparent" />
+          )}
 
           <div className="flex items-center gap-2">
-            <motion.button
-              onClick={handleCapture}
-              whileHover={{ scale: 1.12, backgroundColor: "rgba(255,255,255,0.1)" }}
-              whileTap={{ scale: 0.92 }}
-              transition={springBouncy}
-              className="p-2.5 rounded-xl bg-white/[0.04] text-white/50 hover:text-white transition-colors"
-              title="Screenshot"
-            >
-              <Camera size={17} />
-            </motion.button>
-            <motion.button
-              onClick={isListening ? stopListening : startListening}
-              whileHover={{ scale: 1.12 }}
-              whileTap={{ scale: 0.92 }}
-              transition={springBouncy}
-              className={`p-2.5 rounded-xl transition-all ${
-                isListening
-                  ? "bg-red-500/20 text-red-400 ring-2 ring-red-500/30"
-                  : "bg-white/[0.04] text-white/50 hover:text-white hover:bg-white/10"
-              }`}
-              title="Voice"
-            >
-              <Mic size={17} />
-            </motion.button>
-            <motion.button
-              onClick={handlePasteClipboard}
-              whileHover={{ scale: 1.12 }}
-              whileTap={{ scale: 0.92 }}
-              transition={springBouncy}
-              className="p-2.5 rounded-xl bg-white/[0.04] text-white/50 hover:text-white hover:bg-white/10 transition-colors"
-              title="Paste from Clipboard"
-            >
-              <Clipboard size={17} />
-            </motion.button>
+            {/* Screenshot button (hidden in compact mode) */}
+            {!isCompactMode && (
+              <motion.button
+                onClick={handleCapture}
+                whileHover={{ scale: 1.12, backgroundColor: "rgba(255,255,255,0.1)" }}
+                whileTap={{ scale: 0.92 }}
+                transition={springBouncy}
+                className="p-2.5 rounded-xl bg-white/[0.04] text-white/50 hover:text-white transition-colors"
+                title="Screenshot"
+              >
+                <Camera size={17} />
+              </motion.button>
+            )}
+            {/* Voice button (hidden in compact mode) */}
+            {!isCompactMode && (
+              <motion.button
+                onClick={isListening ? stopListening : startListening}
+                whileHover={{ scale: 1.12 }}
+                whileTap={{ scale: 0.92 }}
+                transition={springBouncy}
+                className={`p-2.5 rounded-xl transition-all ${
+                  isListening
+                    ? "bg-red-500/20 text-red-400 ring-2 ring-red-500/30"
+                    : "bg-white/[0.04] text-white/50 hover:text-white hover:bg-white/10"
+                }`}
+                title="Voice"
+              >
+                <Mic size={17} />
+              </motion.button>
+            )}
+            {/* Clipboard button (hidden in compact mode) */}
+            {!isCompactMode && (
+              <motion.button
+                onClick={handlePasteClipboard}
+                whileHover={{ scale: 1.12 }}
+                whileTap={{ scale: 0.92 }}
+                transition={springBouncy}
+                className="p-2.5 rounded-xl bg-white/[0.04] text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+                title="Paste from Clipboard"
+              >
+                <Clipboard size={17} />
+              </motion.button>
+            )}
             <motion.div
               className="flex-1 relative"
               animate={{ scale: isHovered ? 1.01 : 1 }}
@@ -818,14 +885,17 @@ export function WidgetApp() {
               <Send size={17} />
             </motion.button>
           </div>
-          <motion.p
-            className="text-white/25 text-[10px] mt-2 text-center font-medium tracking-wide"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.4 }}
-          >
-            ⌘⇧G toggle • /help commands • ⌘⇧S screenshot
-          </motion.p>
+          {/* Shortcut hints (hidden in compact mode) */}
+          {!isCompactMode && (
+            <motion.p
+              className="text-white/25 text-[10px] mt-2 text-center font-medium tracking-wide"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4 }}
+            >
+              ⌘⇧G toggle • /help commands • ⌘⇧S screenshot
+            </motion.p>
+          )}
         </motion.div>
       </div>
     </motion.div>
