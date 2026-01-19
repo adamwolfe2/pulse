@@ -13,10 +13,32 @@ import {
 } from "electron"
 import * as path from "path"
 import { autoUpdater } from "electron-updater"
-import { initializeDatabase, closeDatabase } from "./database"
-import { registerDatabaseHandlers } from "./services/databaseIpc"
-import { initializeKeyVault } from "./services/keyVault"
-import { registerVaultHandlers } from "./services/vaultIpc"
+
+// Optional imports - may fail if native modules aren't compiled
+let initializeDatabase: () => void = () => {}
+let closeDatabase: () => void = () => {}
+let registerDatabaseHandlers: () => void = () => {}
+let initializeKeyVault: () => void = () => {}
+let registerVaultHandlers: () => void = () => {}
+
+try {
+  const db = require("./database")
+  initializeDatabase = db.initializeDatabase
+  closeDatabase = db.closeDatabase
+  const dbIpc = require("./services/databaseIpc")
+  registerDatabaseHandlers = dbIpc.registerDatabaseHandlers
+} catch (e) {
+  console.warn("[Database] Native module not available - running without persistence")
+}
+
+try {
+  const vault = require("./services/keyVault")
+  initializeKeyVault = vault.initializeKeyVault
+  const vaultIpc = require("./services/vaultIpc")
+  registerVaultHandlers = vaultIpc.registerVaultHandlers
+} catch (e) {
+  console.warn("[Vault] Module not available")
+}
 
 // Keep references to prevent garbage collection
 let widgetWindow: BrowserWindow | null = null
@@ -439,11 +461,20 @@ function setupAutoUpdater() {
 
 // App lifecycle
 app.whenReady().then(() => {
-  // Initialize services
-  initializeDatabase()
-  registerDatabaseHandlers()
-  initializeKeyVault()
-  registerVaultHandlers()
+  // Initialize services (database is optional - may fail on some systems)
+  try {
+    initializeDatabase()
+    registerDatabaseHandlers()
+  } catch (error) {
+    console.warn("[Database] Failed to initialize (running without persistence):", error)
+  }
+
+  try {
+    initializeKeyVault()
+    registerVaultHandlers()
+  } catch (error) {
+    console.warn("[Vault] Failed to initialize:", error)
+  }
 
   createWidgetWindow()
   createTray()
