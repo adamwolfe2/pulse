@@ -15,21 +15,8 @@ import * as path from "path"
 import { autoUpdater } from "electron-updater"
 
 // Optional imports - may fail if native modules aren't compiled
-let initializeDatabase: () => void = () => {}
-let closeDatabase: () => void = () => {}
-let registerDatabaseHandlers: () => void = () => {}
 let initializeKeyVault: () => void = () => {}
 let registerVaultHandlers: () => void = () => {}
-
-try {
-  const db = require("./database")
-  initializeDatabase = db.initializeDatabase
-  closeDatabase = db.closeDatabase
-  const dbIpc = require("./services/databaseIpc")
-  registerDatabaseHandlers = dbIpc.registerDatabaseHandlers
-} catch (e) {
-  console.warn("[Database] Native module not available - running without persistence")
-}
 
 try {
   const vault = require("./services/keyVault")
@@ -488,14 +475,7 @@ function setupAutoUpdater() {
 
 // App lifecycle
 app.whenReady().then(() => {
-  // Initialize services (database is optional - may fail on some systems)
-  try {
-    initializeDatabase()
-    registerDatabaseHandlers()
-  } catch (error) {
-    console.warn("[Database] Failed to initialize (running without persistence):", error)
-  }
-
+  // Initialize vault for secure key storage
   try {
     initializeKeyVault()
     registerVaultHandlers()
@@ -521,7 +501,6 @@ app.whenReady().then(() => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll()
-  closeDatabase()
 
   if (proactiveInterval) {
     clearInterval(proactiveInterval)
