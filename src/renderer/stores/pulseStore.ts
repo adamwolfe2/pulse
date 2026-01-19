@@ -9,7 +9,7 @@ interface Keybind {
   enabled: boolean
 }
 
-interface GhostState {
+interface PulseState {
   // Current suggestion being displayed
   currentSuggestion: Suggestion | null
 
@@ -44,14 +44,37 @@ interface GhostState {
   addToHistory: (suggestion: Suggestion) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
-  updateSettings: (settings: Partial<GhostState["settings"]>) => void
+  updateSettings: (settings: Partial<PulseState["settings"]>) => void
   triggerNewSuggestion: () => Promise<void>
 }
 
-// Load API key from environment or localStorage
+// Load API key from secure vault (async) - returns empty string synchronously
+// The actual key is loaded asynchronously via initializeApiKey
 const getStoredApiKey = (): string => {
+  // Return empty initially; the key will be loaded from vault asynchronously
+  return ""
+}
+
+// Initialize API key from secure vault
+export async function initializeApiKey(): Promise<string> {
   try {
-    return localStorage.getItem("pulse_api_key") || ""
+    // Try to get from secure vault first
+    const vaultKey = await window.pulse?.vault?.get("anthropic_api_key")
+    if (vaultKey) {
+      return vaultKey
+    }
+
+    // Fall back to localStorage for migration
+    const legacyKey = localStorage.getItem("pulse_api_key")
+    if (legacyKey) {
+      // Migrate to secure vault
+      await window.pulse?.vault?.set("anthropic_api_key", legacyKey)
+      // Clear from localStorage
+      localStorage.removeItem("pulse_api_key")
+      return legacyKey
+    }
+
+    return ""
   } catch {
     return ""
   }
@@ -74,7 +97,7 @@ const defaultKeybinds: Keybind[] = [
   { id: "hide-overlay", action: "Hide Overlay", keys: ["Escape"], enabled: true },
 ]
 
-export const useGhostStore = create<GhostState>((set, get) => {
+export const usePulseStore = create<PulseState>((set, get) => {
   const storedSettings = getStoredSettings()
 
   return {
@@ -118,11 +141,14 @@ export const useGhostStore = create<GhostState>((set, get) => {
   updateSettings: (newSettings) => {
     set((state) => {
       const updated = { ...state.settings, ...newSettings }
-      // Persist all settings to localStorage
+      // Persist settings to localStorage (except API key)
       try {
-        localStorage.setItem("pulse_settings", JSON.stringify(updated))
+        const settingsToStore = { ...updated }
+        delete (settingsToStore as { apiKey?: string }).apiKey
+        localStorage.setItem("pulse_settings", JSON.stringify(settingsToStore))
+        // API key is stored in secure vault, not localStorage
         if (newSettings.apiKey) {
-          localStorage.setItem("pulse_api_key", newSettings.apiKey)
+          window.pulse?.vault?.set("anthropic_api_key", newSettings.apiKey)
         }
       } catch {
         // Ignore storage errors

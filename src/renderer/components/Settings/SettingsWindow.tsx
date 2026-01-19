@@ -11,7 +11,7 @@ import {
   Mic,
   Eye
 } from "lucide-react"
-import { useGhostStore } from "../../stores/ghostStore"
+import { usePulseStore } from "../../stores/pulseStore"
 import { Logo } from "../Logo"
 import { AccentColorConfig } from "./AccentColorConfig"
 import { KeybindsConfig } from "./KeybindsConfig"
@@ -34,7 +34,7 @@ const tabs: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
 
 export function SettingsWindow({ isOpen, onClose }: SettingsWindowProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("behavior")
-  const { settings } = useGhostStore()
+  const { settings } = usePulseStore()
 
   return (
     <AnimatePresence>

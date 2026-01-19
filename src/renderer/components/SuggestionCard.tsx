@@ -17,7 +17,7 @@ export function SuggestionCard({ suggestion, onDismiss, onAction }: SuggestionCa
   useEffect(() => {
     if (cardRef.current) {
       const rect = cardRef.current.getBoundingClientRect()
-      window.ghostbar?.setSuggestionArea({
+      window.pulse?.setSuggestionArea({
         x: rect.x,
         y: rect.y,
         width: rect.width,
@@ -26,7 +26,7 @@ export function SuggestionCard({ suggestion, onDismiss, onAction }: SuggestionCa
     }
 
     return () => {
-      window.ghostbar?.setSuggestionArea(null)
+      window.pulse?.setSuggestionArea(null)
     }
   }, [suggestion])
 

@@ -1,9 +1,9 @@
 import React from "react"
-import { useGhostStore } from "../../stores/ghostStore"
+import { usePulseStore } from "../../stores/pulseStore"
 import { Monitor, Mic, Eye, Clock, Zap } from "lucide-react"
 
 export function BehaviorConfig() {
-  const { settings, updateSettings } = useGhostStore()
+  const { settings, updateSettings } = usePulseStore()
 
   const Toggle = ({
     enabled,
