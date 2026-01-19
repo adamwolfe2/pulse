@@ -12,6 +12,7 @@ import {
   dialog
 } from "electron"
 import * as path from "path"
+import * as fs from "fs"
 import { autoUpdater } from "electron-updater"
 
 // Optional imports - may fail if native modules aren't compiled
@@ -41,6 +42,33 @@ const WIDGET_WIDTH = 420
 const WIDGET_HEIGHT = 380
 const WIDGET_MARGIN = 8
 
+// Window position memory
+const SETTINGS_FILE = path.join(app.getPath("userData"), "pulse-settings.json")
+
+interface AppSettings {
+  windowPosition?: { x: number; y: number }
+  lastDisplay?: string
+}
+
+function loadSettings(): AppSettings {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"))
+    }
+  } catch (e) {
+    console.warn("[Settings] Failed to load settings:", e)
+  }
+  return {}
+}
+
+function saveSettings(settings: AppSettings): void {
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2))
+  } catch (e) {
+    console.warn("[Settings] Failed to save settings:", e)
+  }
+}
+
 // Get the correct path for resources in dev vs production
 const isDev = process.env.NODE_ENV === "development"
 const RENDERER_URL = isDev
@@ -48,15 +76,37 @@ const RENDERER_URL = isDev
   : `file://${path.join(__dirname, "../renderer/index.html")}`
 
 function getWidgetPosition() {
+  const settings = loadSettings()
   const primaryDisplay = screen.getPrimaryDisplay()
-  const { width } = primaryDisplay.workAreaSize
+  const { width, height } = primaryDisplay.workAreaSize
   const menuBarHeight = primaryDisplay.workArea.y || 25
 
-  // Position centered at top, just below menu bar (like Nook)
+  // Try to restore saved position if on same display
+  if (settings.windowPosition && settings.lastDisplay === primaryDisplay.id.toString()) {
+    const { x, y } = settings.windowPosition
+    // Validate position is still on screen
+    if (x >= 0 && x + WIDGET_WIDTH <= width && y >= menuBarHeight && y + WIDGET_HEIGHT <= height) {
+      return { x, y }
+    }
+  }
+
+  // Default: Position centered at top, just below menu bar (like Nook)
   return {
     x: Math.round((width - WIDGET_WIDTH) / 2),
     y: menuBarHeight + WIDGET_MARGIN
   }
+}
+
+function saveWidgetPosition(): void {
+  if (!widgetWindow) return
+
+  const [x, y] = widgetWindow.getPosition()
+  const primaryDisplay = screen.getPrimaryDisplay()
+
+  const settings = loadSettings()
+  settings.windowPosition = { x, y }
+  settings.lastDisplay = primaryDisplay.id.toString()
+  saveSettings(settings)
 }
 
 function createWidgetWindow() {
@@ -232,6 +282,9 @@ function showWidget(mode: "chat" | "voice" = "chat") {
 
 function hideWidget() {
   if (!widgetWindow) return
+
+  // Save position before hiding
+  saveWidgetPosition()
 
   widgetWindow.hide()
   isWidgetVisible = false
