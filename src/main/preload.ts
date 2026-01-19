@@ -39,10 +39,18 @@ interface UpdateStatus {
 
 // Expose protected methods to renderer
 contextBridge.exposeInMainWorld("pulse", {
-  // Overlay control
-  hideOverlay: () => ipcRenderer.send("hide-overlay"),
-  setIgnoreMouse: (ignore: boolean) => ipcRenderer.send("set-ignore-mouse", ignore),
-  enableInteraction: () => ipcRenderer.send("enable-interaction"),
+  // Widget control
+  hideWidget: () => ipcRenderer.send("hide-widget"),
+  showWidget: () => ipcRenderer.send("show-widget"),
+
+  // Settings controls
+  setProactiveMode: (enabled: boolean) => ipcRenderer.send("set-proactive-mode", enabled),
+  setEdgeActivation: (enabled: boolean) => ipcRenderer.send("set-edge-activation", enabled),
+
+  // Legacy aliases
+  hideOverlay: () => ipcRenderer.send("hide-widget"),
+  setIgnoreMouse: (_ignore: boolean) => {}, // No-op for widget mode
+  enableInteraction: () => {},
 
   // Screen capture
   captureScreen: () => ipcRenderer.invoke("capture-screen"),
@@ -92,14 +100,26 @@ contextBridge.exposeInMainWorld("pulse", {
   },
 
   // Event listeners
+  onWidgetShow: (callback: (data: { mode: string }) => void) => {
+    ipcRenderer.on("widget-show", (_, data) => callback(data))
+  },
+  onWidgetHide: (callback: () => void) => {
+    ipcRenderer.on("widget-hide", () => callback())
+  },
+  onOpenSettings: (callback: () => void) => {
+    ipcRenderer.on("open-settings", () => callback())
+  },
+  // Legacy aliases
   onOverlayShow: (callback: (data: { mode: "chat" | "voice" }) => void) => {
-    ipcRenderer.on("overlay-show", (_, data) => callback(data))
+    ipcRenderer.on("widget-show", (_, data) => callback(data))
   },
   onOverlayHide: (callback: () => void) => {
-    ipcRenderer.on("overlay-hide", () => callback())
+    ipcRenderer.on("widget-hide", () => callback())
   },
   onActivateVoice: (callback: () => void) => {
-    ipcRenderer.on("activate-voice", () => callback())
+    ipcRenderer.on("widget-show", (_, data) => {
+      if (data.mode === "voice") callback()
+    })
   },
   onScreenshotReady: (callback: (data: { screenshot: string }) => void) => {
     ipcRenderer.on("screenshot-ready", (_, data) => callback(data))
@@ -119,9 +139,9 @@ contextBridge.exposeInMainWorld("pulse", {
 
   // Cleanup
   removeAllListeners: () => {
-    ipcRenderer.removeAllListeners("overlay-show")
-    ipcRenderer.removeAllListeners("overlay-hide")
-    ipcRenderer.removeAllListeners("activate-voice")
+    ipcRenderer.removeAllListeners("widget-show")
+    ipcRenderer.removeAllListeners("widget-hide")
+    ipcRenderer.removeAllListeners("open-settings")
     ipcRenderer.removeAllListeners("screenshot-ready")
     ipcRenderer.removeAllListeners("proactive-trigger")
     ipcRenderer.removeAllListeners("update-status")

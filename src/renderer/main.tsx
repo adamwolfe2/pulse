@@ -1,10 +1,25 @@
 import React from "react"
 import ReactDOM from "react-dom/client"
-import { App } from "./App"
+import { WidgetApp } from "./WidgetApp"
+import { ErrorBoundary } from "./components/ErrorBoundary"
 import "./styles/global.css"
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-)
+// Debug: Log when React starts mounting
+console.log("[Pulse] React mounting...")
+
+const rootElement = document.getElementById("root")
+if (!rootElement) {
+  console.error("[Pulse] Root element not found!")
+} else {
+  console.log("[Pulse] Root element found, creating React root...")
+
+  ReactDOM.createRoot(rootElement).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <WidgetApp />
+      </ErrorBoundary>
+    </React.StrictMode>
+  )
+
+  console.log("[Pulse] React render called")
+}

@@ -13,18 +13,46 @@ import {
 } from "electron"
 import * as path from "path"
 import { autoUpdater } from "electron-updater"
-import { initializeDatabase, closeDatabase } from "./database"
-import { registerDatabaseHandlers } from "./services/databaseIpc"
-import { initializeKeyVault } from "./services/keyVault"
-import { registerVaultHandlers } from "./services/vaultIpc"
+
+// Optional imports - may fail if native modules aren't compiled
+let initializeDatabase: () => void = () => {}
+let closeDatabase: () => void = () => {}
+let registerDatabaseHandlers: () => void = () => {}
+let initializeKeyVault: () => void = () => {}
+let registerVaultHandlers: () => void = () => {}
+
+try {
+  const db = require("./database")
+  initializeDatabase = db.initializeDatabase
+  closeDatabase = db.closeDatabase
+  const dbIpc = require("./services/databaseIpc")
+  registerDatabaseHandlers = dbIpc.registerDatabaseHandlers
+} catch (e) {
+  console.warn("[Database] Native module not available - running without persistence")
+}
+
+try {
+  const vault = require("./services/keyVault")
+  initializeKeyVault = vault.initializeKeyVault
+  const vaultIpc = require("./services/vaultIpc")
+  registerVaultHandlers = vaultIpc.registerVaultHandlers
+} catch (e) {
+  console.warn("[Vault] Module not available")
+}
 
 // Keep references to prevent garbage collection
-let overlayWindow: BrowserWindow | null = null
+let widgetWindow: BrowserWindow | null = null
 let tray: Tray | null = null
-let isOverlayVisible = false
+let isWidgetVisible = false
 let lastShortcutTime = 0
 let proactiveInterval: NodeJS.Timeout | null = null
 let isProactiveEnabled = false
+let mouseEdgeCheckInterval: NodeJS.Timeout | null = null
+
+// Widget dimensions - compact like Nook/Atoll
+const WIDGET_WIDTH = 420
+const WIDGET_HEIGHT = 380
+const WIDGET_MARGIN = 8
 
 // Get the correct path for resources in dev vs production
 const isDev = process.env.NODE_ENV === "development"
@@ -32,40 +60,87 @@ const RENDERER_URL = isDev
   ? "http://localhost:5173"
   : `file://${path.join(__dirname, "../renderer/index.html")}`
 
-function createOverlayWindow() {
+function getWidgetPosition() {
   const primaryDisplay = screen.getPrimaryDisplay()
-  const { width, height } = primaryDisplay.workAreaSize
+  const { width } = primaryDisplay.workAreaSize
+  const menuBarHeight = primaryDisplay.workArea.y || 25
 
-  overlayWindow = new BrowserWindow({
-    width: width,
-    height: height,
-    x: 0,
-    y: 0,
-    transparent: true,
+  // Position centered at top, just below menu bar (like Nook)
+  return {
+    x: Math.round((width - WIDGET_WIDTH) / 2),
+    y: menuBarHeight + WIDGET_MARGIN
+  }
+}
+
+function createWidgetWindow() {
+  const { x, y } = getWidgetPosition()
+
+  // Use different settings for macOS vs other platforms
+  const isMac = process.platform === "darwin"
+
+  widgetWindow = new BrowserWindow({
+    width: WIDGET_WIDTH,
+    height: WIDGET_HEIGHT,
+    x,
+    y,
+    // Transparency settings - macOS handles this differently
+    transparent: isMac,
     frame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
     movable: false,
     focusable: true,
-    hasShadow: false,
+    hasShadow: true,
+    // Use solid background color for better compatibility
+    // The app container provides its own rounded corners and styling
+    backgroundColor: isMac ? "#00000000" : "#0a0a0f",
+    roundedCorners: true,
+    // Enable hardware acceleration for better rendering
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, "preload.js")
+      preload: path.join(__dirname, "preload.js"),
+      // Enable hardware acceleration
+      enableBlinkFeatures: "CSSColorSchemeUARendering"
     }
   })
 
-  overlayWindow.setIgnoreMouseEvents(true, { forward: true })
-  overlayWindow.loadURL(RENDERER_URL)
-  overlayWindow.hide()
+  console.log("[Main] Loading renderer URL:", RENDERER_URL)
+  console.log("[Main] Preload path:", path.join(__dirname, "preload.js"))
 
-  overlayWindow.on("closed", () => {
-    overlayWindow = null
+  widgetWindow.loadURL(RENDERER_URL)
+  widgetWindow.hide()
+
+  // Log when the page finishes loading
+  widgetWindow.webContents.on("did-finish-load", () => {
+    console.log("[Main] Renderer finished loading")
+  })
+
+  // Log any renderer errors
+  widgetWindow.webContents.on("did-fail-load", (_, errorCode, errorDescription) => {
+    console.error("[Main] Renderer failed to load:", errorCode, errorDescription)
+  })
+
+  // Log console messages from the renderer
+  widgetWindow.webContents.on("console-message", (_, level, message, line, sourceId) => {
+    const levelName = ["verbose", "info", "warning", "error"][level] || "log"
+    console.log(`[Renderer ${levelName}] ${message}`)
+  })
+
+  // Hide when losing focus (click outside)
+  widgetWindow.on("blur", () => {
+    if (isWidgetVisible) {
+      hideWidget()
+    }
+  })
+
+  widgetWindow.on("closed", () => {
+    widgetWindow = null
   })
 
   if (isDev) {
-    overlayWindow.webContents.openDevTools({ mode: "detach" })
+    widgetWindow.webContents.openDevTools({ mode: "detach" })
   }
 }
 
@@ -84,13 +159,15 @@ function createTray() {
 
   const resizedIcon = trayIcon.isEmpty()
     ? trayIcon
-    : trayIcon.resize({ width: 16, height: 16 })
+    : trayIcon.resize({ width: 18, height: 18 })
 
   tray = new Tray(resizedIcon)
-  tray.setToolTip("Pulse - AI Desktop Companion")
+  tray.setToolTip("Pulse")
 
   updateTrayMenu()
-  tray.on("click", () => toggleOverlay("chat"))
+
+  // Click tray icon to toggle widget
+  tray.on("click", () => toggleWidget())
 }
 
 function updateTrayMenu() {
@@ -100,12 +177,12 @@ function updateTrayMenu() {
     {
       label: "Open Pulse",
       accelerator: "CommandOrControl+Shift+G",
-      click: () => toggleOverlay("chat")
+      click: () => showWidget()
     },
     {
       label: "Voice Mode",
       accelerator: "CommandOrControl+Shift+V",
-      click: () => showOverlay("voice")
+      click: () => showWidget("voice")
     },
     {
       label: "Screenshot & Ask",
@@ -114,10 +191,24 @@ function updateTrayMenu() {
     },
     { type: "separator" },
     {
-      label: "Proactive Mode",
+      label: "Proactive Suggestions",
       type: "checkbox",
       checked: isProactiveEnabled,
       click: (menuItem) => toggleProactiveMode(menuItem.checked)
+    },
+    {
+      label: "Edge Activation",
+      type: "checkbox",
+      checked: mouseEdgeCheckInterval !== null,
+      click: (menuItem) => toggleEdgeActivation(menuItem.checked)
+    },
+    { type: "separator" },
+    {
+      label: "Settings...",
+      click: () => {
+        showWidget()
+        widgetWindow?.webContents.send("open-settings")
+      }
     },
     { type: "separator" },
     {
@@ -130,187 +221,158 @@ function updateTrayMenu() {
   tray.setContextMenu(contextMenu)
 }
 
-function toggleOverlay(mode: "chat" | "voice" = "chat") {
-  if (!overlayWindow) return
-
-  if (isOverlayVisible) {
-    hideOverlay()
+function toggleWidget() {
+  if (isWidgetVisible) {
+    hideWidget()
   } else {
-    showOverlay(mode)
+    showWidget()
   }
 }
 
-function showOverlay(mode: "chat" | "voice" = "chat") {
-  if (!overlayWindow) return
+function showWidget(mode: "chat" | "voice" = "chat") {
+  if (!widgetWindow) return
 
-  const primaryDisplay = screen.getPrimaryDisplay()
-  const { width, height } = primaryDisplay.workAreaSize
+  // Update position in case display changed
+  const { x, y } = getWidgetPosition()
+  widgetWindow.setPosition(x, y)
 
-  overlayWindow.setBounds({ x: 0, y: 0, width, height })
-  overlayWindow.show()
-  overlayWindow.setIgnoreMouseEvents(false)
-  isOverlayVisible = true
+  widgetWindow.show()
+  widgetWindow.focus()
+  isWidgetVisible = true
 
-  overlayWindow.webContents.send("overlay-show", { mode })
+  widgetWindow.webContents.send("widget-show", { mode })
 }
 
-function hideOverlay() {
-  if (!overlayWindow) return
+function hideWidget() {
+  if (!widgetWindow) return
 
-  overlayWindow.hide()
-  overlayWindow.setIgnoreMouseEvents(true, { forward: true })
-  isOverlayVisible = false
-
-  overlayWindow.webContents.send("overlay-hide")
+  widgetWindow.hide()
+  isWidgetVisible = false
+  widgetWindow.webContents.send("widget-hide")
 }
 
-// Screen capture function
+// Edge activation - show widget when mouse moves to top edge
+function toggleEdgeActivation(enabled: boolean) {
+  if (enabled && !mouseEdgeCheckInterval) {
+    mouseEdgeCheckInterval = setInterval(() => {
+      const mousePos = screen.getCursorScreenPoint()
+      const primaryDisplay = screen.getPrimaryDisplay()
+      const menuBarHeight = primaryDisplay.workArea.y || 25
+
+      // Trigger if mouse is in the top 5px and centered
+      const { width } = primaryDisplay.workAreaSize
+      const centerZone = width / 4
+
+      if (
+        mousePos.y <= menuBarHeight + 5 &&
+        mousePos.x > centerZone &&
+        mousePos.x < width - centerZone &&
+        !isWidgetVisible
+      ) {
+        showWidget()
+      }
+    }, 100)
+  } else if (!enabled && mouseEdgeCheckInterval) {
+    clearInterval(mouseEdgeCheckInterval)
+    mouseEdgeCheckInterval = null
+  }
+
+  updateTrayMenu()
+}
+
+function toggleProactiveMode(enabled: boolean) {
+  isProactiveEnabled = enabled
+
+  if (enabled && !proactiveInterval) {
+    // Show proactive suggestion every 30 seconds when enabled
+    proactiveInterval = setInterval(async () => {
+      if (!isWidgetVisible) {
+        // Capture screen for context
+        const screenshot = await captureScreen()
+        if (screenshot) {
+          showWidget()
+          widgetWindow?.webContents.send("proactive-trigger", { screenshot })
+        }
+      }
+    }, 30000)
+
+    // Initial trigger after 5 seconds
+    setTimeout(async () => {
+      if (isProactiveEnabled && !isWidgetVisible) {
+        const screenshot = await captureScreen()
+        if (screenshot) {
+          showWidget()
+          widgetWindow?.webContents.send("proactive-trigger", { screenshot })
+        }
+      }
+    }, 5000)
+  } else if (!enabled && proactiveInterval) {
+    clearInterval(proactiveInterval)
+    proactiveInterval = null
+  }
+
+  updateTrayMenu()
+}
+
 async function captureScreen(): Promise<string | null> {
   try {
-    if (process.platform === "darwin") {
-      const status = systemPreferences.getMediaAccessStatus("screen")
-      if (status !== "granted") {
-        console.log("Screen recording permission needed. Status:", status)
-        // Trigger permission prompt
-        await desktopCapturer.getSources({ types: ["screen"] })
-      }
-    }
-
-    // Hide overlay temporarily for clean screenshot
-    const wasVisible = isOverlayVisible
-    if (wasVisible && overlayWindow) {
-      overlayWindow.hide()
-    }
-
-    // Small delay to ensure overlay is hidden
-    await new Promise(resolve => setTimeout(resolve, 100))
-
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
       thumbnailSize: { width: 1920, height: 1080 }
     })
 
-    // Restore overlay
-    if (wasVisible && overlayWindow) {
-      overlayWindow.show()
+    if (sources.length > 0) {
+      const screenshot = sources[0].thumbnail.toDataURL()
+      return screenshot
     }
-
-    if (sources.length === 0) return null
-
-    const primarySource = sources[0]
-    const thumbnail = primarySource.thumbnail
-    const base64 = thumbnail.toPNG().toString("base64")
-    return `data:image/png;base64,${base64}`
   } catch (error) {
     console.error("Screen capture failed:", error)
-    return null
   }
+  return null
 }
 
 async function captureAndAsk() {
   const screenshot = await captureScreen()
   if (screenshot) {
-    showOverlay("chat")
-    setTimeout(() => {
-      overlayWindow?.webContents.send("screenshot-ready", { screenshot })
-    }, 300)
-  }
-}
-
-// Proactive mode - periodically analyze screen
-function toggleProactiveMode(enabled: boolean) {
-  isProactiveEnabled = enabled
-  updateTrayMenu()
-
-  if (enabled) {
-    console.log("Proactive mode enabled - analyzing screen every 30s")
-    proactiveInterval = setInterval(async () => {
-      if (!isOverlayVisible) {
-        const screenshot = await captureScreen()
-        if (screenshot && overlayWindow) {
-          overlayWindow.webContents.send("proactive-trigger", { screenshot })
-        }
-      }
-    }, 30000)
-  } else {
-    console.log("Proactive mode disabled")
-    if (proactiveInterval) {
-      clearInterval(proactiveInterval)
-      proactiveInterval = null
-    }
+    showWidget()
+    widgetWindow?.webContents.send("screenshot-ready", { screenshot })
   }
 }
 
 function registerGlobalShortcuts() {
-  // Main shortcut with double-tap detection
+  // Main toggle
   globalShortcut.register("CommandOrControl+Shift+G", () => {
     const now = Date.now()
-    const timeSinceLastPress = now - lastShortcutTime
-    lastShortcutTime = now
-
-    if (timeSinceLastPress < 400) {
-      // Double-tap = voice mode
-      if (isOverlayVisible) {
-        overlayWindow?.webContents.send("activate-voice")
-      } else {
-        showOverlay("voice")
-      }
-    } else {
-      // Single tap = toggle chat
-      toggleOverlay("chat")
+    if (now - lastShortcutTime > 300) {
+      lastShortcutTime = now
+      toggleWidget()
     }
   })
 
-  // Direct voice shortcut
+  // Voice mode
   globalShortcut.register("CommandOrControl+Shift+V", () => {
-    if (isOverlayVisible) {
-      overlayWindow?.webContents.send("activate-voice")
-    } else {
-      showOverlay("voice")
-    }
+    showWidget("voice")
   })
 
-  // Screenshot shortcut
+  // Screenshot
   globalShortcut.register("CommandOrControl+Shift+S", () => {
     captureAndAsk()
   })
 
   // Escape to hide
   globalShortcut.register("Escape", () => {
-    if (isOverlayVisible) {
-      hideOverlay()
+    if (isWidgetVisible) {
+      hideWidget()
     }
   })
 }
 
 function setupIpcHandlers() {
-  ipcMain.on("set-ignore-mouse", (_, ignore: boolean) => {
-    if (overlayWindow) {
-      overlayWindow.setIgnoreMouseEvents(ignore, { forward: true })
-    }
-  })
-
-  ipcMain.on("hide-overlay", () => {
-    hideOverlay()
-  })
-
-  ipcMain.on("enable-interaction", () => {
-    if (overlayWindow) {
-      overlayWindow.setIgnoreMouseEvents(false)
-    }
-  })
+  ipcMain.on("hide-widget", () => hideWidget())
+  ipcMain.on("show-widget", () => showWidget())
 
   ipcMain.handle("capture-screen", async () => {
     return await captureScreen()
-  })
-
-  ipcMain.handle("get-display-info", () => {
-    const primaryDisplay = screen.getPrimaryDisplay()
-    return {
-      width: primaryDisplay.workAreaSize.width,
-      height: primaryDisplay.workAreaSize.height,
-      scaleFactor: primaryDisplay.scaleFactor
-    }
   })
 
   ipcMain.handle("check-screen-permission", () => {
@@ -331,6 +393,23 @@ function setupIpcHandlers() {
     }
     return "granted"
   })
+
+  ipcMain.handle("get-display-info", () => {
+    const display = screen.getPrimaryDisplay()
+    return {
+      width: display.size.width,
+      height: display.size.height,
+      scaleFactor: display.scaleFactor
+    }
+  })
+
+  ipcMain.on("set-proactive-mode", (_, enabled: boolean) => {
+    toggleProactiveMode(enabled)
+  })
+
+  ipcMain.on("set-edge-activation", (_, enabled: boolean) => {
+    toggleEdgeActivation(enabled)
+  })
 }
 
 // Auto-updater configuration
@@ -340,12 +419,12 @@ function setupAutoUpdater() {
 
   autoUpdater.on("checking-for-update", () => {
     console.log("Checking for updates...")
-    overlayWindow?.webContents.send("update-status", { status: "checking" })
+    widgetWindow?.webContents.send("update-status", { status: "checking" })
   })
 
   autoUpdater.on("update-available", (info) => {
     console.log("Update available:", info.version)
-    overlayWindow?.webContents.send("update-status", {
+    widgetWindow?.webContents.send("update-status", {
       status: "available",
       version: info.version,
       releaseNotes: info.releaseNotes
@@ -354,11 +433,11 @@ function setupAutoUpdater() {
 
   autoUpdater.on("update-not-available", () => {
     console.log("App is up to date")
-    overlayWindow?.webContents.send("update-status", { status: "up-to-date" })
+    widgetWindow?.webContents.send("update-status", { status: "up-to-date" })
   })
 
   autoUpdater.on("download-progress", (progress) => {
-    overlayWindow?.webContents.send("update-status", {
+    widgetWindow?.webContents.send("update-status", {
       status: "downloading",
       percent: Math.round(progress.percent),
       bytesPerSecond: progress.bytesPerSecond,
@@ -369,7 +448,7 @@ function setupAutoUpdater() {
 
   autoUpdater.on("update-downloaded", (info) => {
     console.log("Update downloaded:", info.version)
-    overlayWindow?.webContents.send("update-status", {
+    widgetWindow?.webContents.send("update-status", {
       status: "ready",
       version: info.version,
       releaseNotes: info.releaseNotes
@@ -378,7 +457,7 @@ function setupAutoUpdater() {
 
   autoUpdater.on("error", (error) => {
     console.error("Auto-updater error:", error)
-    overlayWindow?.webContents.send("update-status", {
+    widgetWindow?.webContents.send("update-status", {
       status: "error",
       error: error.message
     })
@@ -409,46 +488,57 @@ function setupAutoUpdater() {
 
 // App lifecycle
 app.whenReady().then(() => {
-  // Initialize services
-  initializeDatabase()
-  registerDatabaseHandlers()
-  initializeKeyVault()
-  registerVaultHandlers()
+  // Initialize services (database is optional - may fail on some systems)
+  try {
+    initializeDatabase()
+    registerDatabaseHandlers()
+  } catch (error) {
+    console.warn("[Database] Failed to initialize (running without persistence):", error)
+  }
 
-  createOverlayWindow()
+  try {
+    initializeKeyVault()
+    registerVaultHandlers()
+  } catch (error) {
+    console.warn("[Vault] Failed to initialize:", error)
+  }
+
+  createWidgetWindow()
   createTray()
   registerGlobalShortcuts()
   setupIpcHandlers()
   setupAutoUpdater()
 
+  // Enable edge activation by default
+  toggleEdgeActivation(true)
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createOverlayWindow()
+      createWidgetWindow()
     }
   })
 })
 
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll()
+  closeDatabase()
+
+  if (proactiveInterval) {
+    clearInterval(proactiveInterval)
+  }
+  if (mouseEdgeCheckInterval) {
+    clearInterval(mouseEdgeCheckInterval)
+  }
+})
+
 app.on("window-all-closed", () => {
+  // Keep running in tray on macOS
   if (process.platform !== "darwin") {
     app.quit()
   }
 })
 
-app.on("will-quit", () => {
-  globalShortcut.unregisterAll()
-  if (proactiveInterval) {
-    clearInterval(proactiveInterval)
-  }
-  closeDatabase()
-})
-
-const gotTheLock = app.requestSingleInstanceLock()
-if (!gotTheLock) {
-  app.quit()
-} else {
-  app.on("second-instance", () => {
-    if (overlayWindow) {
-      showOverlay("chat")
-    }
-  })
+// macOS specific: hide dock icon (menu bar app only)
+if (process.platform === "darwin") {
+  app.dock?.hide()
 }
