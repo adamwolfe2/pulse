@@ -88,8 +88,7 @@ function createWidgetWindow() {
     movable: false,
     focusable: true,
     hasShadow: true,
-    vibrancy: "under-window",
-    visualEffectState: "active",
+    backgroundColor: "#00000000",
     roundedCorners: true,
     webPreferences: {
       nodeIntegration: false,

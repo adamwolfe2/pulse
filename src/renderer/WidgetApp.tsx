@@ -242,11 +242,27 @@ export function WidgetApp() {
 
   if (!isInitialized) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-black/90 rounded-3xl">
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#0a0a0f",
+          borderRadius: 24
+        }}
+      >
         <motion.div
           animate={{ rotate: 360 }}
           transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          className="w-8 h-8 border-2 border-white/20 border-t-white/60 rounded-full"
+          style={{
+            width: 32,
+            height: 32,
+            border: "2px solid rgba(255,255,255,0.2)",
+            borderTopColor: "rgba(255,255,255,0.6)",
+            borderRadius: "50%"
+          }}
         />
       </div>
     )
@@ -254,7 +270,16 @@ export function WidgetApp() {
 
   return (
     <motion.div
-      className="w-full h-full overflow-hidden flex flex-col relative"
+      style={{
+        width: "100%",
+        height: "100%",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
+        background: "#0a0a0f",
+        borderRadius: 24
+      }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       initial={{ opacity: 0, y: -30, scale: 0.92 }}
@@ -262,38 +287,22 @@ export function WidgetApp() {
         opacity: 1,
         y: 0,
         scale: 1,
-        // Subtle hover expansion like Atoll
-        ...(isHovered && { scale: 1.005 })
+        borderRadius: isHovered ? 28 : 24
       }}
       transition={springOpen}
     >
-      {/* Notch-style background with corner radius */}
-      <motion.div
-        className="absolute inset-0 overflow-hidden"
-        style={{
-          background: "linear-gradient(180deg, rgba(0,0,0,0.98) 0%, rgba(15,15,20,0.98) 100%)",
-          borderRadius: isHovered ? 28 : 24,
-        }}
-        animate={{
-          borderRadius: isHovered ? 28 : 24,
-          boxShadow: isHovered
-            ? "0 30px 60px -15px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255,255,255,0.08) inset"
-            : "0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.05) inset"
-        }}
-        transition={springBouncy}
-      />
-
       {/* Subtle gradient glow at top */}
-      <motion.div
-        className="absolute top-0 left-0 right-0 h-32 pointer-events-none"
+      <div
         style={{
-          background: "radial-gradient(ellipse 80% 50% at 50% 0%, rgba(99, 102, 241, 0.12) 0%, transparent 100%)",
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 128,
+          pointerEvents: "none",
+          background: "radial-gradient(ellipse 80% 50% at 50% 0%, rgba(99, 102, 241, 0.15) 0%, transparent 100%)",
           borderRadius: "24px 24px 0 0"
         }}
-        animate={{
-          opacity: isHovered ? 0.8 : 0.5
-        }}
-        transition={springSmooth}
       />
 
       {/* Content container */}
