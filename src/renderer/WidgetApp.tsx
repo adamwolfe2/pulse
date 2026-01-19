@@ -1,11 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import { Mic, Send, Camera, Settings, Sparkles, MessageSquare, X } from "lucide-react"
+import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion"
+import { Mic, Send, Camera, Settings, Sparkles, MessageSquare, X, Zap } from "lucide-react"
 import { usePulseStore, initializeApiKey } from "./stores/pulseStore"
-import { streamChat, analyzeScreenWithVision } from "./lib/claude"
+import { streamChat } from "./lib/claude"
 import { MarkdownRenderer } from "./components/MarkdownRenderer"
-import { OnboardingFlow } from "./components/Onboarding"
-import { SettingsWindow } from "./components/Settings"
 import { Logo } from "./components/Logo"
 
 interface Message {
@@ -15,65 +13,75 @@ interface Message {
   screenshot?: string
 }
 
-type WidgetView = "suggestions" | "chat" | "voice"
+type WidgetView = "home" | "chat" | "voice"
 
 export function WidgetApp() {
-  const [isVisible, setIsVisible] = useState(false)
-  const [view, setView] = useState<WidgetView>("suggestions")
+  const [view, setView] = useState<WidgetView>("home")
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [currentScreenshot, setCurrentScreenshot] = useState<string | null>(null)
   const [streamingContent, setStreamingContent] = useState("")
-  const [showSettings, setShowSettings] = useState(false)
-  const [showOnboarding, setShowOnboarding] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
-  const [proactiveSuggestion, setProactiveSuggestion] = useState<string | null>(null)
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false)
+  const [apiKeyInput, setApiKeyInput] = useState("")
 
   const inputRef = useRef<HTMLInputElement>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const { settings, updateSettings } = usePulseStore()
 
+  // Mouse position for magnetic effect
+  const mouseX = useMotionValue(0)
+  const mouseY = useMotionValue(0)
+  const springConfig = { damping: 25, stiffness: 200 }
+  const x = useSpring(mouseX, springConfig)
+  const y = useSpring(mouseY, springConfig)
+
   // Initialize
   useEffect(() => {
     async function initialize() {
-      const apiKey = await initializeApiKey()
-      if (apiKey) {
-        updateSettings({ apiKey })
+      try {
+        const apiKey = await initializeApiKey()
+        if (apiKey) {
+          updateSettings({ apiKey })
+        }
+      } catch (e) {
+        console.log("API key init skipped")
       }
-
-      const onboardingComplete = localStorage.getItem("pulse_onboarding_complete")
-      if (!onboardingComplete && !apiKey) {
-        setShowOnboarding(true)
-      }
-
       setIsInitialized(true)
     }
-
     initialize()
+  }, [])
+
+  // Mouse tracking for magnetic effect
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      const rect = document.body.getBoundingClientRect()
+      const centerX = rect.width / 2
+      const centerY = rect.height / 2
+      const deltaX = (e.clientX - centerX) / 50
+      const deltaY = (e.clientY - centerY) / 50
+      mouseX.set(deltaX)
+      mouseY.set(deltaY)
+    }
+
+    window.addEventListener("mousemove", handleMouseMove)
+    return () => window.removeEventListener("mousemove", handleMouseMove)
   }, [])
 
   // Widget events
   useEffect(() => {
     window.pulse?.onWidgetShow?.((data) => {
-      setIsVisible(true)
       if (data.mode === "voice") {
         setView("voice")
         startListening()
-      } else {
-        setView(messages.length > 0 ? "chat" : "suggestions")
       }
       setTimeout(() => inputRef.current?.focus(), 100)
     })
 
     window.pulse?.onWidgetHide?.(() => {
-      setIsVisible(false)
       stopListening()
-    })
-
-    window.pulse?.onOpenSettings?.(() => {
-      setShowSettings(true)
     })
 
     window.pulse?.onScreenshotReady?.((data) => {
@@ -81,29 +89,10 @@ export function WidgetApp() {
       setView("chat")
     })
 
-    window.pulse?.onProactiveTrigger?.(async (data) => {
-      if (settings.apiKey) {
-        setIsLoading(true)
-        try {
-          const response = await analyzeScreenWithVision(
-            settings.apiKey,
-            data.screenshot,
-            "Look at what the user is doing and provide a brief, helpful suggestion or insight. Be concise (1-2 sentences)."
-          )
-          setProactiveSuggestion(response)
-          setCurrentScreenshot(data.screenshot)
-        } catch (error) {
-          console.error("Proactive suggestion failed:", error)
-        } finally {
-          setIsLoading(false)
-        }
-      }
-    })
-
     return () => {
       window.pulse?.removeAllListeners?.()
     }
-  }, [settings.apiKey, messages.length])
+  }, [])
 
   const startListening = useCallback(() => {
     if (!("webkitSpeechRecognition" in window)) return
@@ -119,13 +108,8 @@ export function WidgetApp() {
       setInputValue(transcript)
     }
 
-    recognition.onerror = () => {
-      setIsListening(false)
-    }
-
-    recognition.onend = () => {
-      setIsListening(false)
-    }
+    recognition.onerror = () => setIsListening(false)
+    recognition.onend = () => setIsListening(false)
 
     recognition.start()
     recognitionRef.current = recognition
@@ -159,20 +143,22 @@ export function WidgetApp() {
     setInputValue("")
     setIsLoading(true)
     setStreamingContent("")
-    setProactiveSuggestion(null)
 
-    try {
-      if (!settings.apiKey) {
-        const assistantMessage: Message = {
+    if (!settings.apiKey) {
+      setMessages((prev) => [
+        ...prev,
+        {
           id: `msg-${Date.now()}-resp`,
           role: "assistant",
-          content: "Please set your API key in settings to use Pulse."
+          content: "Please add your Claude API key to start chatting."
         }
-        setMessages((prev) => [...prev, assistantMessage])
-        setIsLoading(false)
-        return
-      }
+      ])
+      setIsLoading(false)
+      setShowApiKeyInput(true)
+      return
+    }
 
+    try {
       const chatMessages = messages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content
@@ -191,25 +177,29 @@ export function WidgetApp() {
         }
       )
 
-      const assistantMessage: Message = {
-        id: `msg-${Date.now()}-resp`,
-        role: "assistant",
-        content: fullResponse
-      }
-
-      setMessages((prev) => [...prev, assistantMessage])
+      setMessages((prev) => [
+        ...prev,
+        { id: `msg-${Date.now()}-resp`, role: "assistant", content: fullResponse }
+      ])
       setStreamingContent("")
       setCurrentScreenshot(null)
     } catch (error) {
       console.error("Chat error:", error)
-      const errorMessage: Message = {
-        id: `msg-${Date.now()}-err`,
-        role: "assistant",
-        content: "Something went wrong. Please try again."
-      }
-      setMessages((prev) => [...prev, errorMessage])
+      setMessages((prev) => [
+        ...prev,
+        { id: `msg-${Date.now()}-err`, role: "assistant", content: "Something went wrong. Please try again." }
+      ])
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleSaveApiKey = () => {
+    if (apiKeyInput.trim()) {
+      updateSettings({ apiKey: apiKeyInput.trim() })
+      window.pulse?.vault?.set?.("anthropic_api_key", apiKeyInput.trim())
+      setShowApiKeyInput(false)
+      setApiKeyInput("")
     }
   }
 
@@ -218,239 +208,246 @@ export function WidgetApp() {
     if (screenshot) {
       setCurrentScreenshot(screenshot)
       setView("chat")
+      inputRef.current?.focus()
     }
-  }
-
-  const handleSuggestionClick = (suggestion: string) => {
-    setInputValue(suggestion)
-    setView("chat")
-    setTimeout(() => inputRef.current?.focus(), 50)
   }
 
   const handleClose = () => {
     window.pulse?.hideWidget?.()
   }
 
-  if (!isInitialized) return null
+  const quickActions = [
+    { label: "What's on my screen?", icon: "👀", action: () => handleCapture() },
+    { label: "Help me write something", icon: "✍️", action: () => { setInputValue("Help me write "); setView("chat"); } },
+    { label: "Explain this to me", icon: "💡", action: () => { setInputValue("Explain "); setView("chat"); } },
+    { label: "Voice mode", icon: "🎤", action: startListening }
+  ]
 
-  if (showOnboarding) {
-    return <OnboardingFlow onComplete={() => setShowOnboarding(false)} />
+  if (!isInitialized) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          className="w-8 h-8 border-2 border-white/20 border-t-white/60 rounded-full"
+        />
+      </div>
+    )
   }
 
   return (
-    <div className="w-full h-full">
-      <AnimatePresence>
-        {showSettings && (
-          <SettingsWindow isOpen={showSettings} onClose={() => setShowSettings(false)} />
-        )}
-      </AnimatePresence>
-
-      <motion.div
-        initial={{ opacity: 0, y: -10, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: -10, scale: 0.98 }}
-        className="w-full h-full rounded-2xl overflow-hidden flex flex-col"
+    <motion.div
+      style={{ x, y }}
+      initial={{ opacity: 0, y: -20, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: "spring", damping: 20, stiffness: 300 }}
+      className="w-full h-full rounded-2xl overflow-hidden flex flex-col"
+    >
+      {/* Animated gradient background */}
+      <div
+        className="absolute inset-0 rounded-2xl"
         style={{
-          background: "rgba(20, 20, 25, 0.92)",
+          background: "linear-gradient(135deg, rgba(20, 20, 30, 0.95) 0%, rgba(30, 25, 40, 0.95) 100%)",
           backdropFilter: "blur(40px)",
           WebkitBackdropFilter: "blur(40px)",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
-          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.6)"
+          border: "1px solid rgba(255, 255, 255, 0.1)",
+          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255,255,255,0.05) inset"
         }}
-      >
+      />
+
+      {/* Pulsing glow effect */}
+      <motion.div
+        className="absolute inset-0 rounded-2xl pointer-events-none"
+        animate={{
+          boxShadow: [
+            "0 0 20px 0px rgba(99, 102, 241, 0.0)",
+            "0 0 30px 5px rgba(99, 102, 241, 0.15)",
+            "0 0 20px 0px rgba(99, 102, 241, 0.0)"
+          ]
+        }}
+        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+      />
+
+      {/* Content */}
+      <div className="relative z-10 flex flex-col h-full">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
-          <div className="flex items-center gap-2">
-            <Logo size={20} />
-            <span className="text-white/80 font-medium text-sm">Pulse</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setShowSettings(true)}
-              className="p-1.5 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors"
+          <motion.div
+            className="flex items-center gap-2"
+            initial={{ x: -10, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            transition={{ delay: 0.1 }}
+          >
+            <motion.div
+              animate={{ rotate: [0, 5, -5, 0] }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
             >
-              <Settings size={16} />
-            </button>
-            <button
-              onClick={handleClose}
-              className="p-1.5 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors"
-            >
-              <X size={16} />
-            </button>
-          </div>
+              <Logo size={22} />
+            </motion.div>
+            <span className="text-white/90 font-semibold text-sm">Pulse</span>
+            <motion.div
+              className="w-2 h-2 rounded-full bg-green-400"
+              animate={{ scale: [1, 1.2, 1], opacity: [1, 0.7, 1] }}
+              transition={{ duration: 2, repeat: Infinity }}
+            />
+          </motion.div>
+          <motion.button
+            onClick={handleClose}
+            className="p-1.5 rounded-lg text-white/40 hover:text-white/80 hover:bg-white/10 transition-all"
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+          >
+            <X size={16} />
+          </motion.button>
         </div>
 
-        {/* Content */}
+        {/* Main content area */}
         <div className="flex-1 overflow-hidden">
           <AnimatePresence mode="wait">
-            {view === "suggestions" && (
-              <SuggestionsView
-                key="suggestions"
-                proactiveSuggestion={proactiveSuggestion}
-                screenshot={currentScreenshot}
-                isLoading={isLoading}
-                onSuggestionClick={handleSuggestionClick}
-                onStartChat={() => setView("chat")}
-              />
+            {view === "home" && (
+              <motion.div
+                key="home"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="h-full p-4 flex flex-col"
+              >
+                {/* Greeting */}
+                <motion.div
+                  className="text-center mb-4"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                >
+                  <h2 className="text-white/90 text-lg font-medium mb-1">
+                    How can I help?
+                  </h2>
+                  <p className="text-white/50 text-sm">
+                    Ask me anything or try a quick action
+                  </p>
+                </motion.div>
+
+                {/* Quick actions */}
+                <div className="grid grid-cols-2 gap-2 flex-1">
+                  {quickActions.map((action, i) => (
+                    <motion.button
+                      key={action.label}
+                      onClick={action.action}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.1 * (i + 1) }}
+                      whileHover={{ scale: 1.02, backgroundColor: "rgba(255,255,255,0.1)" }}
+                      whileTap={{ scale: 0.98 }}
+                      className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl
+                               bg-white/5 border border-white/5 text-white/80 hover:text-white
+                               transition-colors"
+                    >
+                      <span className="text-2xl">{action.icon}</span>
+                      <span className="text-xs text-center leading-tight">{action.label}</span>
+                    </motion.button>
+                  ))}
+                </div>
+
+                {/* API Key prompt if needed */}
+                {showApiKeyInput && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-3 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20"
+                  >
+                    <p className="text-white/70 text-xs mb-2">Enter your Claude API key:</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={apiKeyInput}
+                        onChange={(e) => setApiKeyInput(e.target.value)}
+                        placeholder="sk-ant-..."
+                        className="flex-1 px-3 py-1.5 rounded-lg bg-white/10 text-white text-sm
+                                 placeholder-white/30 focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                      />
+                      <button
+                        onClick={handleSaveApiKey}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-500 text-white text-sm font-medium"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </motion.div>
             )}
 
             {view === "chat" && (
               <ChatView
-                key="chat"
                 messages={messages}
                 streamingContent={streamingContent}
                 isLoading={isLoading}
                 screenshot={currentScreenshot}
+                onClearScreenshot={() => setCurrentScreenshot(null)}
               />
             )}
 
             {view === "voice" && (
-              <VoiceView
-                key="voice"
-                isListening={isListening}
-                transcript={inputValue}
-              />
+              <VoiceView isListening={isListening} transcript={inputValue} />
             )}
           </AnimatePresence>
         </div>
 
-        {/* Input */}
+        {/* Input area */}
         <div className="p-3 border-t border-white/5">
           <div className="flex items-center gap-2">
-            <button
+            <motion.button
               onClick={handleCapture}
-              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/50 hover:text-white/70 transition-colors"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/50 hover:text-white/80 transition-colors"
               title="Screenshot"
             >
               <Camera size={18} />
-            </button>
-            <button
+            </motion.button>
+            <motion.button
               onClick={isListening ? stopListening : startListening}
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
               className={`p-2 rounded-lg transition-colors ${
                 isListening
                   ? "bg-red-500/20 text-red-400"
-                  : "bg-white/5 hover:bg-white/10 text-white/50 hover:text-white/70"
+                  : "bg-white/5 hover:bg-white/10 text-white/50 hover:text-white/80"
               }`}
               title="Voice"
             >
               <Mic size={18} />
-            </button>
+            </motion.button>
             <input
               ref={inputRef}
               type="text"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              onFocus={() => view === "home" && setView("chat")}
               placeholder={isListening ? "Listening..." : "Ask anything..."}
               className="flex-1 bg-white/5 text-white placeholder-white/30 rounded-lg px-3 py-2 text-sm
-                       focus:outline-none focus:ring-1 focus:ring-white/20"
+                       focus:outline-none focus:ring-1 focus:ring-indigo-500/50 focus:bg-white/10 transition-all"
             />
-            <button
+            <motion.button
               onClick={handleSend}
               disabled={!inputValue.trim() || isLoading}
-              className={`p-2 rounded-lg transition-colors ${
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              className={`p-2 rounded-lg transition-all ${
                 inputValue.trim() && !isLoading
-                  ? "bg-indigo-500 text-white hover:bg-indigo-600"
+                  ? "bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-lg shadow-indigo-500/25"
                   : "bg-white/5 text-white/30"
               }`}
             >
               <Send size={18} />
-            </button>
+            </motion.button>
           </div>
-        </div>
-      </motion.div>
-    </div>
-  )
-}
-
-function SuggestionsView({
-  proactiveSuggestion,
-  screenshot,
-  isLoading,
-  onSuggestionClick,
-  onStartChat
-}: {
-  proactiveSuggestion: string | null
-  screenshot: string | null
-  isLoading: boolean
-  onSuggestionClick: (s: string) => void
-  onStartChat: () => void
-}) {
-  const quickActions = [
-    { label: "Summarize this page", icon: "📝" },
-    { label: "Help me write...", icon: "✍️" },
-    { label: "Explain this code", icon: "💻" },
-    { label: "What should I do next?", icon: "🤔" }
-  ]
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="h-full p-4 overflow-y-auto"
-    >
-      {/* Proactive suggestion */}
-      {(proactiveSuggestion || isLoading) && (
-        <div className="mb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles size={14} className="text-indigo-400" />
-            <span className="text-xs text-white/50 uppercase tracking-wider">Suggestion</span>
-          </div>
-          <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/20">
-            {isLoading ? (
-              <div className="flex items-center gap-2 text-white/50 text-sm">
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                  className="w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full"
-                />
-                Analyzing your screen...
-              </div>
-            ) : (
-              <>
-                {screenshot && (
-                  <img
-                    src={screenshot}
-                    alt="Context"
-                    className="w-full h-16 object-cover rounded-lg mb-2 opacity-50"
-                  />
-                )}
-                <p className="text-white/80 text-sm">{proactiveSuggestion}</p>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Quick actions */}
-      <div className="space-y-2">
-        <span className="text-xs text-white/40 uppercase tracking-wider">Quick Actions</span>
-        <div className="grid grid-cols-2 gap-2">
-          {quickActions.map((action) => (
-            <button
-              key={action.label}
-              onClick={() => onSuggestionClick(action.label)}
-              className="flex items-center gap-2 p-3 rounded-xl bg-white/5 hover:bg-white/10
-                       text-white/70 hover:text-white text-sm text-left transition-colors"
-            >
-              <span>{action.icon}</span>
-              <span className="truncate">{action.label}</span>
-            </button>
-          ))}
+          <p className="text-white/30 text-[10px] mt-2 text-center">
+            ⌘⇧G toggle • ⌘⇧V voice • ⌘⇧S screenshot • ESC close
+          </p>
         </div>
       </div>
-
-      {/* Start chat prompt */}
-      <button
-        onClick={onStartChat}
-        className="w-full mt-4 p-3 rounded-xl border border-dashed border-white/10
-                 text-white/40 hover:text-white/60 hover:border-white/20 text-sm transition-colors
-                 flex items-center justify-center gap-2"
-      >
-        <MessageSquare size={16} />
-        Start a conversation
-      </button>
     </motion.div>
   )
 }
@@ -459,12 +456,14 @@ function ChatView({
   messages,
   streamingContent,
   isLoading,
-  screenshot
+  screenshot,
+  onClearScreenshot
 }: {
   messages: Message[]
   streamingContent: string
   isLoading: boolean
   screenshot: string | null
+  onClearScreenshot: () => void
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
@@ -474,131 +473,166 @@ function ChatView({
 
   return (
     <motion.div
+      key="chat"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="h-full overflow-y-auto p-3 space-y-3"
+      className="h-full flex flex-col"
     >
-      {/* Screenshot preview if attached */}
-      {screenshot && messages.length === 0 && (
-        <div className="flex justify-center">
-          <img
-            src={screenshot}
-            alt="Screenshot"
-            className="max-h-20 rounded-lg opacity-70"
-          />
-        </div>
-      )}
-
-      {messages.map((msg) => (
-        <div
-          key={msg.id}
-          className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+      {/* Screenshot preview */}
+      {screenshot && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          className="px-3 py-2 border-b border-white/5"
         >
-          <div
-            className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
-              msg.role === "user"
-                ? "bg-indigo-500/30 text-white"
-                : "bg-white/5 text-white/90"
-            }`}
+          <div className="flex items-center gap-2">
+            <img src={screenshot} alt="Screenshot" className="h-10 rounded opacity-70" />
+            <span className="text-white/50 text-xs flex-1">Screenshot attached</span>
+            <button onClick={onClearScreenshot} className="text-white/40 hover:text-white/70">
+              <X size={14} />
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {messages.length === 0 && !streamingContent && (
+          <div className="text-center text-white/40 py-8">
+            <Sparkles size={24} className="mx-auto mb-2 opacity-50" />
+            <p className="text-sm">Start a conversation</p>
+          </div>
+        )}
+
+        {messages.map((msg, i) => (
+          <motion.div
+            key={msg.id}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05 }}
+            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
-            {msg.screenshot && (
-              <img
-                src={msg.screenshot}
-                alt="Context"
-                className="max-h-16 rounded-lg mb-2 opacity-70"
-              />
-            )}
-            {msg.role === "assistant" ? (
-              <MarkdownRenderer content={msg.content} />
-            ) : (
-              <p>{msg.content}</p>
-            )}
-          </div>
-        </div>
-      ))}
-
-      {streamingContent && (
-        <div className="flex justify-start">
-          <div className="max-w-[85%] rounded-xl px-3 py-2 text-sm bg-white/5 text-white/90">
-            <MarkdownRenderer content={streamingContent} />
-            <span className="inline-block w-1.5 h-3 bg-white/50 animate-pulse ml-0.5" />
-          </div>
-        </div>
-      )}
-
-      {isLoading && !streamingContent && (
-        <div className="flex justify-start">
-          <div className="rounded-xl px-3 py-2 bg-white/5">
-            <div className="flex gap-1">
-              {[0, 1, 2].map((i) => (
-                <motion.span
-                  key={i}
-                  className="w-1.5 h-1.5 rounded-full bg-white/50"
-                  animate={{ y: [0, -4, 0] }}
-                  transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.1 }}
-                />
-              ))}
+            <div
+              className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
+                msg.role === "user"
+                  ? "bg-gradient-to-r from-indigo-500/40 to-purple-500/40 text-white"
+                  : "bg-white/5 text-white/90"
+              }`}
+            >
+              {msg.role === "assistant" ? (
+                <MarkdownRenderer content={msg.content} />
+              ) : (
+                <p>{msg.content}</p>
+              )}
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        ))}
 
-      <div ref={messagesEndRef} />
+        {/* Streaming response */}
+        {streamingContent && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex justify-start"
+          >
+            <div className="max-w-[85%] rounded-2xl px-3 py-2 text-sm bg-white/5 text-white/90">
+              <MarkdownRenderer content={streamingContent} />
+              <motion.span
+                animate={{ opacity: [1, 0.3, 1] }}
+                transition={{ duration: 0.8, repeat: Infinity }}
+                className="inline-block w-2 h-4 bg-indigo-400 ml-1"
+              />
+            </div>
+          </motion.div>
+        )}
+
+        {/* Loading indicator */}
+        {isLoading && !streamingContent && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex justify-start"
+          >
+            <div className="rounded-2xl px-4 py-3 bg-white/5">
+              <div className="flex gap-1">
+                {[0, 1, 2].map((i) => (
+                  <motion.div
+                    key={i}
+                    className="w-2 h-2 rounded-full bg-indigo-400"
+                    animate={{ y: [0, -6, 0], opacity: [0.5, 1, 0.5] }}
+                    transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
+                  />
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
     </motion.div>
   )
 }
 
-function VoiceView({
-  isListening,
-  transcript
-}: {
-  isListening: boolean
-  transcript: string
-}) {
+function VoiceView({ isListening, transcript }: { isListening: boolean; transcript: string }) {
   return (
     <motion.div
+      key="voice"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="h-full flex flex-col items-center justify-center p-6"
     >
-      {/* Animated mic icon */}
+      {/* Animated rings */}
       <div className="relative mb-6">
+        {[1, 2, 3].map((ring) => (
+          <motion.div
+            key={ring}
+            className="absolute inset-0 rounded-full border-2 border-indigo-500/30"
+            style={{ margin: -ring * 15 }}
+            animate={isListening ? {
+              scale: [1, 1.2, 1],
+              opacity: [0.3, 0.1, 0.3]
+            } : {}}
+            transition={{
+              duration: 1.5,
+              repeat: Infinity,
+              delay: ring * 0.2
+            }}
+          />
+        ))}
         <motion.div
-          className="w-20 h-20 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center"
-          animate={
-            isListening
-              ? {
-                  scale: [1, 1.1, 1],
-                  boxShadow: [
-                    "0 0 0 0 rgba(99, 102, 241, 0.4)",
-                    "0 0 0 20px rgba(99, 102, 241, 0)",
-                    "0 0 0 0 rgba(99, 102, 241, 0)"
-                  ]
-                }
-              : {}
-          }
-          transition={{ duration: 1.5, repeat: Infinity }}
+          className="relative w-20 h-20 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600
+                     flex items-center justify-center shadow-lg shadow-indigo-500/30"
+          animate={isListening ? { scale: [1, 1.05, 1] } : {}}
+          transition={{ duration: 0.5, repeat: Infinity }}
         >
           <Mic size={32} className="text-white" />
         </motion.div>
       </div>
 
-      <p className="text-white/50 text-sm mb-4">
-        {isListening ? "Listening..." : "Press the mic button to speak"}
-      </p>
+      <motion.p
+        animate={{ opacity: [0.5, 1, 0.5] }}
+        transition={{ duration: 2, repeat: Infinity }}
+        className="text-white/60 text-sm mb-4"
+      >
+        {isListening ? "Listening..." : "Click the mic to speak"}
+      </motion.p>
 
       {transcript && (
-        <div className="w-full p-3 rounded-xl bg-white/5 text-white/80 text-sm text-center">
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full p-3 rounded-xl bg-white/5 text-white/80 text-sm text-center"
+        >
           "{transcript}"
-        </div>
+        </motion.div>
       )}
     </motion.div>
   )
 }
 
-// Speech recognition type
 declare global {
   interface Window {
     webkitSpeechRecognition: new () => SpeechRecognition
