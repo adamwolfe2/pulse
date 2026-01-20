@@ -2,6 +2,7 @@ import React from "react"
 import ReactDOM from "react-dom/client"
 import { WidgetApp } from "./WidgetApp"
 import { ErrorBoundary } from "./components/ErrorBoundary"
+import { ToastProvider } from "./components/Toast"
 import "./styles/global.css"
 
 // Debug: Log when React starts mounting
@@ -16,7 +17,9 @@ if (!rootElement) {
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
       <ErrorBoundary>
-        <WidgetApp />
+        <ToastProvider>
+          <WidgetApp />
+        </ToastProvider>
       </ErrorBoundary>
     </React.StrictMode>
   )

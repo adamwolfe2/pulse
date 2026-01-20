@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react"
+import { useEffect, useState, useRef, useCallback, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Mic, Send, Camera, X, Sparkles, History, Settings, Clipboard, ChevronDown, ChevronUp, Minimize2, Maximize2 } from "lucide-react"
 import { usePulseStore, initializeApiKey } from "./stores/pulseStore"
@@ -11,6 +11,9 @@ import { SettingsWindow } from "./components/Settings/SettingsWindow"
 import { OnboardingFlow } from "./components/Onboarding/OnboardingFlow"
 import { ConversationSidebar } from "./components/ConversationSidebar"
 import { KeyboardShortcutsPanel } from "./components/KeyboardShortcutsPanel"
+import { MessageActions } from "./components/MessageActions"
+import { useToast } from "./components/Toast"
+import { useGlobalShortcuts } from "./hooks/useKeyboardNavigation"
 import {
   saveConversation,
   getConversations,
@@ -103,6 +106,21 @@ export function WidgetApp() {
   const inputRef = useRef<HTMLInputElement>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const { settings, updateSettings } = usePulseStore()
+  const toast = useToast()
+
+  // Global keyboard shortcuts
+  const shortcuts = useMemo(() => ({
+    "cmd+shift+g": () => window.pulse?.hideWidget?.(),
+    "cmd+shift+s": () => handleCapture(),
+    "cmd+shift+v": () => startListening(),
+    "cmd+n": () => handleNewConversation(),
+    "cmd+,": () => setShowSettings(true),
+    "cmd+k": () => setShowCommandPalette(true),
+    "cmd+h": () => setShowHistory(true),
+    "cmd+shift+?": () => setShowShortcuts(true),
+  }), [])
+
+  useGlobalShortcuts(shortcuts)
 
   console.log("[WidgetApp] Hooks initialized, isInitialized:", isInitialized)
 
@@ -318,10 +336,12 @@ export function WidgetApp() {
       setCurrentConversation(conv)
     } catch (error) {
       console.error("Chat error:", error)
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
       setMessages((prev) => [
         ...prev,
         { id: `msg-${Date.now()}-err`, role: "assistant", content: "Something went wrong. Please try again." }
       ])
+      toast.error("Failed to send message", errorMessage)
     } finally {
       setIsLoading(false)
     }
@@ -333,6 +353,7 @@ export function WidgetApp() {
       window.pulse?.vault?.set?.("anthropic_api_key", apiKeyInput.trim())
       setShowApiKeyInput(false)
       setApiKeyInput("")
+      toast.success("API key saved", "You can now start chatting")
     }
   }
 
@@ -420,12 +441,19 @@ export function WidgetApp() {
 
   // Handle clipboard paste
   const handlePasteClipboard = async () => {
-    const content = await readClipboard()
-    const formatted = formatClipboardForContext(content)
-    setClipboardContent(formatted)
-    if (content.type !== "empty") {
-      setInputValue(prev => prev ? prev + "\n\n" + formatted : formatted)
-      setView("chat")
+    try {
+      const content = await readClipboard()
+      const formatted = formatClipboardForContext(content)
+      setClipboardContent(formatted)
+      if (content.type !== "empty") {
+        setInputValue(prev => prev ? prev + "\n\n" + formatted : formatted)
+        setView("chat")
+        toast.info("Clipboard content added", `Added ${content.type} from clipboard`)
+      } else {
+        toast.warning("Clipboard empty", "No content to paste")
+      }
+    } catch (error) {
+      toast.error("Clipboard access failed", "Please check permissions")
     }
   }
 
@@ -464,6 +492,84 @@ export function WidgetApp() {
     setCurrentConversation(null)
     setView("home")
   }
+
+  // Handle message regeneration
+  const handleRegenerate = useCallback(async (messageId: string) => {
+    // Find the message index
+    const msgIndex = messages.findIndex(m => m.id === messageId)
+    if (msgIndex === -1 || messages[msgIndex].role !== "assistant") return
+
+    // Find the preceding user message
+    let userMsgIndex = msgIndex - 1
+    while (userMsgIndex >= 0 && messages[userMsgIndex].role !== "user") {
+      userMsgIndex--
+    }
+    if (userMsgIndex < 0) return
+
+    const userMessage = messages[userMsgIndex]
+
+    // Remove the assistant message we're regenerating
+    const newMessages = messages.slice(0, msgIndex)
+    setMessages(newMessages)
+    setIsLoading(true)
+    setStreamingContent("")
+
+    try {
+      const chatMessages = newMessages.map(m => ({
+        role: m.role as "user" | "assistant",
+        content: m.content
+      }))
+
+      let fullResponse = ""
+      await streamChat(
+        settings.apiKey,
+        chatMessages,
+        undefined,
+        (chunk) => {
+          fullResponse += chunk
+          setStreamingContent(fullResponse)
+        }
+      )
+
+      const newAssistantMsg: Message = {
+        id: `msg-${Date.now()}-regen`,
+        role: "assistant",
+        content: fullResponse,
+        timestamp: Date.now()
+      }
+
+      setMessages([...newMessages, newAssistantMsg])
+      setStreamingContent("")
+      toast.success("Response regenerated")
+    } catch (error) {
+      console.error("Regenerate error:", error)
+      toast.error("Failed to regenerate", "Please try again")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [messages, settings.apiKey, toast])
+
+  // Handle message feedback
+  const handleFeedback = useCallback((messageId: string, type: "positive" | "negative") => {
+    // Store feedback (could be sent to analytics or stored locally)
+    console.log(`Feedback for message ${messageId}: ${type}`)
+
+    // Show toast confirmation
+    if (type === "positive") {
+      toast.success("Thanks for your feedback!", "We appreciate your input")
+    } else {
+      toast.info("Feedback recorded", "We'll work on improving")
+    }
+
+    // Could also store in localStorage for analytics
+    const feedbackData = JSON.parse(localStorage.getItem("pulse_feedback") || "[]")
+    feedbackData.push({
+      messageId,
+      type,
+      timestamp: Date.now()
+    })
+    localStorage.setItem("pulse_feedback", JSON.stringify(feedbackData))
+  }, [toast])
 
   if (!isInitialized) {
     return (
@@ -767,6 +873,8 @@ export function WidgetApp() {
                   isLoading={isLoading}
                   screenshot={currentScreenshot}
                   onClearScreenshot={() => setCurrentScreenshot(null)}
+                  onRegenerate={handleRegenerate}
+                  onFeedback={handleFeedback}
                 />
               </motion.div>
             )}
@@ -908,15 +1016,20 @@ function ChatView({
   streamingContent,
   isLoading,
   screenshot,
-  onClearScreenshot
+  onClearScreenshot,
+  onRegenerate,
+  onFeedback
 }: {
   messages: Message[]
   streamingContent: string
   isLoading: boolean
   screenshot: string | null
   onClearScreenshot: () => void
+  onRegenerate?: (messageId: string) => void
+  onFeedback?: (messageId: string, type: "positive" | "negative") => void
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -970,23 +1083,47 @@ function ChatView({
             initial={{ opacity: 0, y: 15, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ ...springOpen, delay: Math.min(i * 0.03, 0.15) }}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} group`}
+            onMouseEnter={() => setHoveredMessageId(msg.id)}
+            onMouseLeave={() => setHoveredMessageId(null)}
           >
-            <motion.div
-              whileHover={{ scale: 1.01 }}
-              transition={springBouncy}
-              className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm ${
-                msg.role === "user"
-                  ? "bg-gradient-to-br from-indigo-500/30 to-purple-500/30 text-white border border-indigo-500/20"
-                  : "bg-white/[0.04] text-white/90 border border-white/[0.06]"
-              }`}
-            >
-              {msg.role === "assistant" ? (
-                <MarkdownRenderer content={msg.content} />
-              ) : (
-                <p>{msg.content}</p>
-              )}
-            </motion.div>
+            <div className="relative">
+              <motion.div
+                whileHover={{ scale: 1.01 }}
+                transition={springBouncy}
+                className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm ${
+                  msg.role === "user"
+                    ? "bg-gradient-to-br from-indigo-500/30 to-purple-500/30 text-white border border-indigo-500/20"
+                    : "bg-white/[0.04] text-white/90 border border-white/[0.06]"
+                }`}
+              >
+                {msg.role === "assistant" ? (
+                  <MarkdownRenderer content={msg.content} />
+                ) : (
+                  <p>{msg.content}</p>
+                )}
+              </motion.div>
+
+              {/* Message Actions - show on hover */}
+              <AnimatePresence>
+                {hoveredMessageId === msg.id && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 5 }}
+                    className={`absolute -bottom-8 ${msg.role === "user" ? "right-0" : "left-0"}`}
+                  >
+                    <MessageActions
+                      content={msg.content}
+                      messageId={msg.id}
+                      isAssistant={msg.role === "assistant"}
+                      onRegenerate={msg.role === "assistant" ? () => onRegenerate?.(msg.id) : undefined}
+                      onFeedback={msg.role === "assistant" ? (type) => onFeedback?.(msg.id, type) : undefined}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </motion.div>
         ))}
 
