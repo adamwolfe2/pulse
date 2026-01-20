@@ -12,6 +12,7 @@ import {
   dialog
 } from "electron"
 import * as path from "path"
+import * as fs from "fs"
 import { autoUpdater } from "electron-updater"
 
 // Optional imports - may fail if native modules aren't compiled
@@ -39,7 +40,36 @@ let mouseEdgeCheckInterval: NodeJS.Timeout | null = null
 // Widget dimensions - compact like Nook/Atoll
 const WIDGET_WIDTH = 420
 const WIDGET_HEIGHT = 380
+const WIDGET_HEIGHT_COMPACT = 72
 const WIDGET_MARGIN = 8
+let isCompactMode = false
+
+// Window position memory
+const SETTINGS_FILE = path.join(app.getPath("userData"), "pulse-settings.json")
+
+interface AppSettings {
+  windowPosition?: { x: number; y: number }
+  lastDisplay?: string
+}
+
+function loadSettings(): AppSettings {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"))
+    }
+  } catch (e) {
+    console.warn("[Settings] Failed to load settings:", e)
+  }
+  return {}
+}
+
+function saveSettings(settings: AppSettings): void {
+  try {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2))
+  } catch (e) {
+    console.warn("[Settings] Failed to save settings:", e)
+  }
+}
 
 // Get the correct path for resources in dev vs production
 const isDev = process.env.NODE_ENV === "development"
@@ -48,15 +78,37 @@ const RENDERER_URL = isDev
   : `file://${path.join(__dirname, "../renderer/index.html")}`
 
 function getWidgetPosition() {
+  const settings = loadSettings()
   const primaryDisplay = screen.getPrimaryDisplay()
-  const { width } = primaryDisplay.workAreaSize
+  const { width, height } = primaryDisplay.workAreaSize
   const menuBarHeight = primaryDisplay.workArea.y || 25
 
-  // Position centered at top, just below menu bar (like Nook)
+  // Try to restore saved position if on same display
+  if (settings.windowPosition && settings.lastDisplay === primaryDisplay.id.toString()) {
+    const { x, y } = settings.windowPosition
+    // Validate position is still on screen
+    if (x >= 0 && x + WIDGET_WIDTH <= width && y >= menuBarHeight && y + WIDGET_HEIGHT <= height) {
+      return { x, y }
+    }
+  }
+
+  // Default: Position centered at top, just below menu bar (like Nook)
   return {
     x: Math.round((width - WIDGET_WIDTH) / 2),
     y: menuBarHeight + WIDGET_MARGIN
   }
+}
+
+function saveWidgetPosition(): void {
+  if (!widgetWindow) return
+
+  const [x, y] = widgetWindow.getPosition()
+  const primaryDisplay = screen.getPrimaryDisplay()
+
+  const settings = loadSettings()
+  settings.windowPosition = { x, y }
+  settings.lastDisplay = primaryDisplay.id.toString()
+  saveSettings(settings)
 }
 
 function createWidgetWindow() {
@@ -132,7 +184,7 @@ function createWidgetWindow() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, "../../assets/Pulselogo.png")
+  const iconPath = path.join(__dirname, "../../assets/icon.png")
   let trayIcon: nativeImage
 
   try {
@@ -160,12 +212,23 @@ function createTray() {
 function updateTrayMenu() {
   if (!tray) return
 
+  const appVersion = app.getVersion()
+
   const contextMenu = Menu.buildFromTemplate([
     {
       label: "Open Pulse",
       accelerator: "CommandOrControl+Shift+G",
       click: () => showWidget()
     },
+    {
+      label: "New Conversation",
+      accelerator: "CommandOrControl+N",
+      click: () => {
+        showWidget()
+        widgetWindow?.webContents.send("new-conversation")
+      }
+    },
+    { type: "separator" },
     {
       label: "Voice Mode",
       accelerator: "CommandOrControl+Shift+V",
@@ -175,6 +238,14 @@ function updateTrayMenu() {
       label: "Screenshot & Ask",
       accelerator: "CommandOrControl+Shift+S",
       click: () => captureAndAsk()
+    },
+    { type: "separator" },
+    {
+      label: "Conversation History",
+      click: () => {
+        showWidget()
+        widgetWindow?.webContents.send("open-history")
+      }
     },
     { type: "separator" },
     {
@@ -189,12 +260,50 @@ function updateTrayMenu() {
       checked: mouseEdgeCheckInterval !== null,
       click: (menuItem) => toggleEdgeActivation(menuItem.checked)
     },
+    {
+      label: "Launch at Login",
+      type: "checkbox",
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (menuItem) => {
+        app.setLoginItemSettings({
+          openAtLogin: menuItem.checked,
+          openAsHidden: true
+        })
+      }
+    },
     { type: "separator" },
     {
       label: "Settings...",
+      accelerator: "CommandOrControl+,",
       click: () => {
         showWidget()
         widgetWindow?.webContents.send("open-settings")
+      }
+    },
+    {
+      label: "Keyboard Shortcuts",
+      click: () => {
+        showWidget()
+        widgetWindow?.webContents.send("open-shortcuts")
+      }
+    },
+    { type: "separator" },
+    {
+      label: "Check for Updates",
+      click: () => {
+        autoUpdater.checkForUpdatesAndNotify()
+      }
+    },
+    {
+      label: `About Pulse v${appVersion}`,
+      click: () => {
+        dialog.showMessageBox({
+          type: "info",
+          title: "About Pulse",
+          message: "Pulse - AI Desktop Companion",
+          detail: `Version ${appVersion}\n\nYour intelligent AI assistant, always just a shortcut away.\n\n© 2024 Pulse`,
+          buttons: ["OK"]
+        })
       }
     },
     { type: "separator" },
@@ -232,6 +341,9 @@ function showWidget(mode: "chat" | "voice" = "chat") {
 
 function hideWidget() {
   if (!widgetWindow) return
+
+  // Save position before hiding
+  saveWidgetPosition()
 
   widgetWindow.hide()
   isWidgetVisible = false
@@ -396,6 +508,27 @@ function setupIpcHandlers() {
 
   ipcMain.on("set-edge-activation", (_, enabled: boolean) => {
     toggleEdgeActivation(enabled)
+  })
+
+  // Compact/expanded mode handler
+  ipcMain.on("set-widget-mode", (_, mode: "compact" | "expanded") => {
+    if (!widgetWindow) return
+
+    isCompactMode = mode === "compact"
+    const newHeight = isCompactMode ? WIDGET_HEIGHT_COMPACT : WIDGET_HEIGHT
+
+    // Get current position to maintain x position
+    const [x, y] = widgetWindow.getPosition()
+
+    // Animate height change
+    widgetWindow.setSize(WIDGET_WIDTH, newHeight, true)
+
+    // Notify renderer of mode change
+    widgetWindow.webContents.send("widget-mode-changed", { mode })
+  })
+
+  ipcMain.handle("get-widget-mode", () => {
+    return isCompactMode ? "compact" : "expanded"
   })
 }
 

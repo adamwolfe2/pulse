@@ -47,6 +47,10 @@ contextBridge.exposeInMainWorld("pulse", {
   setProactiveMode: (enabled: boolean) => ipcRenderer.send("set-proactive-mode", enabled),
   setEdgeActivation: (enabled: boolean) => ipcRenderer.send("set-edge-activation", enabled),
 
+  // Widget mode (compact/expanded)
+  setWidgetMode: (mode: "compact" | "expanded") => ipcRenderer.send("set-widget-mode", mode),
+  getWidgetMode: () => ipcRenderer.invoke("get-widget-mode"),
+
   // Legacy aliases
   hideOverlay: () => ipcRenderer.send("hide-widget"),
   setIgnoreMouse: (_ignore: boolean) => {}, // No-op for widget mode
@@ -109,6 +113,18 @@ contextBridge.exposeInMainWorld("pulse", {
   onOpenSettings: (callback: () => void) => {
     ipcRenderer.on("open-settings", () => callback())
   },
+  onOpenHistory: (callback: () => void) => {
+    ipcRenderer.on("open-history", () => callback())
+  },
+  onOpenShortcuts: (callback: () => void) => {
+    ipcRenderer.on("open-shortcuts", () => callback())
+  },
+  onNewConversation: (callback: () => void) => {
+    ipcRenderer.on("new-conversation", () => callback())
+  },
+  onWidgetModeChanged: (callback: (data: { mode: "compact" | "expanded" }) => void) => {
+    ipcRenderer.on("widget-mode-changed", (_, data) => callback(data))
+  },
   // Legacy aliases
   onOverlayShow: (callback: (data: { mode: "chat" | "voice" }) => void) => {
     ipcRenderer.on("widget-show", (_, data) => callback(data))
@@ -142,6 +158,10 @@ contextBridge.exposeInMainWorld("pulse", {
     ipcRenderer.removeAllListeners("widget-show")
     ipcRenderer.removeAllListeners("widget-hide")
     ipcRenderer.removeAllListeners("open-settings")
+    ipcRenderer.removeAllListeners("open-history")
+    ipcRenderer.removeAllListeners("open-shortcuts")
+    ipcRenderer.removeAllListeners("new-conversation")
+    ipcRenderer.removeAllListeners("widget-mode-changed")
     ipcRenderer.removeAllListeners("screenshot-ready")
     ipcRenderer.removeAllListeners("proactive-trigger")
     ipcRenderer.removeAllListeners("update-status")
@@ -152,13 +172,28 @@ contextBridge.exposeInMainWorld("pulse", {
 declare global {
   interface Window {
     pulse: {
+      // Widget control
+      hideWidget: () => void
+      showWidget: () => void
       hideOverlay: () => void
       setIgnoreMouse: (ignore: boolean) => void
       enableInteraction: () => void
+
+      // Widget mode
+      setWidgetMode: (mode: "compact" | "expanded") => void
+      getWidgetMode: () => Promise<"compact" | "expanded">
+
+      // Screen capture
       captureScreen: () => Promise<string | null>
       checkScreenPermission: () => Promise<string>
       getMicPermission: () => Promise<string>
       getDisplayInfo: () => Promise<{ width: number; height: number; scaleFactor: number }>
+
+      // Settings
+      setProactiveMode: (enabled: boolean) => void
+      setEdgeActivation: (enabled: boolean) => void
+
+      // Vault
       vault: {
         get: (key: string) => Promise<string | null>
         set: (key: string, value: string) => Promise<boolean>
@@ -167,6 +202,8 @@ declare global {
         isSecure: () => Promise<boolean>
         migrate: (legacyData: Record<string, string>) => Promise<boolean>
       }
+
+      // Database
       db: {
         conversations: {
           create: (title?: string) => Promise<Conversation>
@@ -189,6 +226,15 @@ declare global {
         }
         stats: () => Promise<{ totalConversations: number; totalMessages: number; totalTokens: number }>
       }
+
+      // Event listeners
+      onWidgetShow: (callback: (data: { mode: string }) => void) => void
+      onWidgetHide: (callback: () => void) => void
+      onOpenSettings: (callback: () => void) => void
+      onOpenHistory: (callback: () => void) => void
+      onOpenShortcuts: (callback: () => void) => void
+      onNewConversation: (callback: () => void) => void
+      onWidgetModeChanged: (callback: (data: { mode: "compact" | "expanded" }) => void) => void
       onOverlayShow: (callback: (data: { mode: "chat" | "voice" }) => void) => void
       onOverlayHide: (callback: () => void) => void
       onActivateVoice: (callback: () => void) => void
@@ -204,10 +250,14 @@ declare global {
         total?: number
         error?: string
       }) => void) => void
+
+      // Updates
       updates: {
         check: () => Promise<{ success: boolean; version?: string; error?: string }>
         install: () => Promise<void>
       }
+
+      // Cleanup
       removeAllListeners: () => void
     }
   }
