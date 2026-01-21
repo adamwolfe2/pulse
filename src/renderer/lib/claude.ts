@@ -47,12 +47,25 @@ export async function analyzeScreenWithVision(
   return content.text
 }
 
+// Default system prompt (used if no persona provided)
+const DEFAULT_SYSTEM_PROMPT = `You are Pulse, a helpful AI desktop companion. You appear as a floating glassmorphic overlay on the user's screen.
+
+You can see the user's screen when they share a screenshot, and you help them with:
+- Answering questions about what's on their screen
+- Providing quick information and assistance
+- Helping with tasks they're working on
+- Being a proactive, intelligent assistant
+
+Be conversational, helpful, and concise. Your responses appear in a chat overlay, so keep them readable and not too long unless detail is needed.`
+
 // Stream chat messages with optional screenshot context
 export async function streamChat(
   apiKey: string,
   messages: Array<{ role: "user" | "assistant"; content: string }>,
-  screenshot: string | null,
-  onChunk: (chunk: string) => void
+  screenshot: string | null | undefined,
+  onChunk: (chunk: string) => void,
+  systemPrompt?: string,
+  temperature?: number
 ): Promise<void> {
   const client = new Anthropic({
     apiKey,
@@ -93,20 +106,19 @@ export async function streamChat(
     })
   }
 
-  const stream = await client.messages.stream({
+  const streamOptions: Parameters<typeof client.messages.stream>[0] = {
     model: "claude-sonnet-4-20250514",
     max_tokens: 4096,
-    system: `You are Pulse, a helpful AI desktop companion. You appear as a floating glassmorphic overlay on the user's screen.
-
-You can see the user's screen when they share a screenshot, and you help them with:
-- Answering questions about what's on their screen
-- Providing quick information and assistance
-- Helping with tasks they're working on
-- Being a proactive, intelligent assistant
-
-Be conversational, helpful, and concise. Your responses appear in a chat overlay, so keep them readable and not too long unless detail is needed.`,
+    system: systemPrompt || DEFAULT_SYSTEM_PROMPT,
     messages: apiMessages
-  })
+  }
+
+  // Add temperature if specified (must be between 0 and 1)
+  if (temperature !== undefined && temperature >= 0 && temperature <= 1) {
+    streamOptions.temperature = temperature
+  }
+
+  const stream = await client.messages.stream(streamOptions)
 
   for await (const event of stream) {
     if (event.type === "content_block_delta" && event.delta.type === "text_delta") {

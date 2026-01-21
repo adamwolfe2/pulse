@@ -12,8 +12,13 @@ import { OnboardingFlow } from "./components/Onboarding/OnboardingFlow"
 import { ConversationSidebar } from "./components/ConversationSidebar"
 import { KeyboardShortcutsPanel } from "./components/KeyboardShortcutsPanel"
 import { MessageActions } from "./components/MessageActions"
+import { PersonaSelector } from "./components/PersonaSelector"
+import { DropZone, useDropZone, formatFilesForContext, type DroppedFile } from "./components/DropZone"
+import { ContextUsageIndicator } from "./components/ContextUsageBar"
 import { useToast } from "./components/Toast"
 import { useGlobalShortcuts } from "./hooks/useKeyboardNavigation"
+import { getActivePersona, buildSystemMessage, type Persona } from "./lib/personas"
+import { prepareMessagesForAPI, getContextUsage } from "./lib/contextWindow"
 import {
   saveConversation,
   getConversations,
@@ -102,6 +107,8 @@ export function WidgetApp() {
   const [clipboardContent, setClipboardContent] = useState<string | null>(null)
   const [contextGreeting, setContextGreeting] = useState("")
   const [isCompactMode, setIsCompactMode] = useState(false)
+  const [activePersona, setActivePersona] = useState<Persona>(getActivePersona())
+  const [droppedFiles, setDroppedFiles] = useState<DroppedFile[]>([])
 
   const inputRef = useRef<HTMLInputElement>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
@@ -262,10 +269,17 @@ export function WidgetApp() {
     setView("chat")
     trackInteraction()
 
+    // Include dropped files in the message content
+    let messageContent = text
+    if (droppedFiles.length > 0) {
+      const filesContext = formatFilesForContext(droppedFiles)
+      messageContent = `${text}\n\n${filesContext}`
+    }
+
     const userMessage: Message = {
       id: `msg-${Date.now()}`,
       role: "user",
-      content: text,
+      content: text, // Show original text to user
       screenshot: currentScreenshot || undefined,
       timestamp: Date.now()
     }
@@ -273,6 +287,7 @@ export function WidgetApp() {
     const newMessages = [...messages, userMessage]
     setMessages(newMessages)
     setInputValue("")
+    setDroppedFiles([]) // Clear dropped files after sending
     setIsLoading(true)
     setStreamingContent("")
     setShowCommandPalette(false)
@@ -292,22 +307,38 @@ export function WidgetApp() {
     }
 
     try {
-      const chatMessages = messages.map((m) => ({
+      // Build system prompt from active persona
+      const systemPrompt = buildSystemMessage(activePersona)
+
+      // Prepare messages with context window management
+      const apiMessages = messages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content
       }))
-      chatMessages.push({ role: "user", content: text })
+      apiMessages.push({ role: "user", content: messageContent })
+
+      const { messages: preparedMessages, truncated } = prepareMessagesForAPI(
+        apiMessages,
+        systemPrompt,
+        selectedModelId
+      )
+
+      if (truncated) {
+        toast.info("Context trimmed", "Older messages were removed to fit context window")
+      }
 
       let fullResponse = ""
 
       await streamChat(
         settings.apiKey,
-        chatMessages,
+        preparedMessages,
         currentScreenshot || undefined,
         (chunk) => {
           fullResponse += chunk
           setStreamingContent(fullResponse)
-        }
+        },
+        systemPrompt,
+        activePersona.temperature
       )
 
       const assistantMessage: Message = {
@@ -699,6 +730,14 @@ export function WidgetApp() {
           </motion.div>
 
           <div className="flex items-center gap-1">
+            {/* Persona selector - compact (hidden in compact mode) */}
+            {!isCompactMode && (
+              <PersonaSelector
+                onPersonaChange={(persona) => setActivePersona(persona)}
+                compact
+              />
+            )}
+
             {/* Model selector - compact (hidden in compact mode) */}
             {!isCompactMode && (
               <ModelSelector
@@ -913,6 +952,18 @@ export function WidgetApp() {
             <div className="mx-1 mb-2 h-px bg-gradient-to-r from-transparent via-white/8 to-transparent" />
           )}
 
+          {/* Drop Zone for file attachments */}
+          <DropZone
+            onFilesDropped={(files) => {
+              setDroppedFiles(prev => [...prev, ...files])
+              toast.success(`Added ${files.length} file(s)`, files.map(f => f.file.name).join(', '))
+            }}
+            onFileRemoved={(fileId) => {
+              setDroppedFiles(prev => prev.filter(f => f.id !== fileId))
+            }}
+            files={droppedFiles}
+            maxFiles={5}
+          >
           <div className="flex items-center gap-2">
             {/* Screenshot button (hidden in compact mode) */}
             {!isCompactMode && (
@@ -993,16 +1044,24 @@ export function WidgetApp() {
               <Send size={17} />
             </motion.button>
           </div>
-          {/* Shortcut hints (hidden in compact mode) */}
+          </DropZone>
+          {/* Shortcut hints and context indicator (hidden in compact mode) */}
           {!isCompactMode && (
-            <motion.p
-              className="text-white/25 text-[10px] mt-2 text-center font-medium tracking-wide"
+            <motion.div
+              className="flex items-center justify-center gap-3 mt-2"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.4 }}
             >
-              ⌘⇧G toggle • /help commands • ⌘⇧S screenshot
-            </motion.p>
+              <p className="text-white/25 text-[10px] font-medium tracking-wide">
+                ⌘⇧G toggle • /help commands • ⌘⇧S screenshot
+              </p>
+              <ContextUsageIndicator
+                messages={messages.map(m => ({ role: m.role, content: m.content }))}
+                modelId={selectedModelId}
+                systemPrompt={activePersona.systemPrompt}
+              />
+            </motion.div>
           )}
         </motion.div>
       </div>
