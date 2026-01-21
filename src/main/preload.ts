@@ -153,6 +153,47 @@ contextBridge.exposeInMainWorld("pulse", {
     install: () => ipcRenderer.invoke("update:install"),
   },
 
+  // Task List Window
+  taskWindow: {
+    show: () => ipcRenderer.send("task-list:show"),
+    hide: () => ipcRenderer.send("task-list:hide"),
+    toggle: () => ipcRenderer.send("task-list:toggle"),
+    minimize: () => ipcRenderer.send("task-list:minimize"),
+    resize: (height: number) => ipcRenderer.send("task-list:resize", { height }),
+    isVisible: () => ipcRenderer.invoke("task-list:get-visible"),
+  },
+
+  // Task notifications
+  tasks: {
+    notifyTaskAdded: (task: any) => ipcRenderer.send("task-added", task),
+    setWindowVisible: (visible: boolean) => ipcRenderer.send(visible ? "task-list:show" : "task-list:hide"),
+  },
+
+  // Dynamic Island
+  island: {
+    expand: (context?: any) => ipcRenderer.send("island:expand", context),
+    collapse: () => ipcRenderer.send("island:collapse"),
+    hide: () => ipcRenderer.send("island:hide"),
+    setMode: (mode: string) => ipcRenderer.send("island:set-mode", mode),
+    getState: () => ipcRenderer.invoke("island:get-state"),
+  },
+
+  // Quick Task Capture trigger
+  triggerQuickTask: () => ipcRenderer.send("quick-task-capture"),
+
+  // Quick task capture event
+  onQuickTaskCapture: (callback: () => void) => {
+    ipcRenderer.on("quick-task-capture", () => callback())
+  },
+
+  // Island events
+  onIslandState: (callback: (data: { state: string; context?: any }) => void) => {
+    ipcRenderer.on("island-state", (_, data) => callback(data))
+  },
+  onIslandMode: (callback: (mode: string) => void) => {
+    ipcRenderer.on("island-mode", (_, mode) => callback(mode))
+  },
+
   // Cleanup
   removeAllListeners: () => {
     ipcRenderer.removeAllListeners("widget-show")
@@ -165,6 +206,9 @@ contextBridge.exposeInMainWorld("pulse", {
     ipcRenderer.removeAllListeners("screenshot-ready")
     ipcRenderer.removeAllListeners("proactive-trigger")
     ipcRenderer.removeAllListeners("update-status")
+    ipcRenderer.removeAllListeners("quick-task-capture")
+    ipcRenderer.removeAllListeners("island-state")
+    ipcRenderer.removeAllListeners("island-mode")
   }
 })
 
@@ -256,6 +300,37 @@ declare global {
         check: () => Promise<{ success: boolean; version?: string; error?: string }>
         install: () => Promise<void>
       }
+
+      // Task List Window
+      taskWindow: {
+        show: () => void
+        hide: () => void
+        toggle: () => void
+        minimize: () => void
+        resize: (height: number) => void
+        isVisible: () => Promise<boolean>
+      }
+
+      // Task notifications
+      tasks: {
+        notifyTaskAdded: (task: any) => void
+        setWindowVisible: (visible: boolean) => void
+      }
+
+      // Dynamic Island
+      island: {
+        expand: (context?: any) => void
+        collapse: () => void
+        hide: () => void
+        setMode: (mode: string) => void
+        getState: () => Promise<string>
+      }
+
+      // Quick task capture
+      triggerQuickTask: () => void
+      onQuickTaskCapture: (callback: () => void) => void
+      onIslandState: (callback: (data: { state: string; context?: any }) => void) => void
+      onIslandMode: (callback: (mode: string) => void) => void
 
       // Cleanup
       removeAllListeners: () => void

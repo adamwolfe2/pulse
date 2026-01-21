@@ -30,12 +30,19 @@ try {
 
 // Keep references to prevent garbage collection
 let widgetWindow: BrowserWindow | null = null
+let taskListWindow: BrowserWindow | null = null
+let dynamicIslandWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isWidgetVisible = false
+let isTaskListVisible = false
+let isDynamicIslandVisible = false
 let lastShortcutTime = 0
 let proactiveInterval: NodeJS.Timeout | null = null
 let isProactiveEnabled = false
 let mouseEdgeCheckInterval: NodeJS.Timeout | null = null
+let dynamicIslandHoverTimer: NodeJS.Timeout | null = null
+let dynamicIslandDismissTimer: NodeJS.Timeout | null = null
+let islandState: 'hidden' | 'pill' | 'expanded' = 'hidden'
 
 // Widget dimensions - compact like Nook/Atoll
 const WIDGET_WIDTH = 420
@@ -44,11 +51,25 @@ const WIDGET_HEIGHT_COMPACT = 72
 const WIDGET_MARGIN = 8
 let isCompactMode = false
 
+// Task list window dimensions
+const TASK_LIST_WIDTH = 320
+const TASK_LIST_HEIGHT = 400
+const TASK_LIST_MIN_HEIGHT = 150
+const TASK_LIST_MAX_HEIGHT = 600
+
+// Dynamic Island dimensions
+const ISLAND_WIDTH_PILL = 160
+const ISLAND_HEIGHT_PILL = 36
+const ISLAND_WIDTH_EXPANDED = 380
+const ISLAND_HEIGHT_EXPANDED = 280
+
 // Window position memory
 const SETTINGS_FILE = path.join(app.getPath("userData"), "pulse-settings.json")
 
 interface AppSettings {
   windowPosition?: { x: number; y: number }
+  taskListPosition?: { x: number; y: number }
+  taskListVisible?: boolean
   lastDisplay?: string
 }
 
@@ -183,6 +204,268 @@ function createWidgetWindow() {
   }
 }
 
+// Task List Window - Floating, draggable task widget
+function createTaskListWindow() {
+  const settings = loadSettings()
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width, height } = primaryDisplay.workAreaSize
+
+  // Default position: right side of screen
+  const defaultX = width - TASK_LIST_WIDTH - 20
+  const defaultY = 100
+
+  const x = settings.taskListPosition?.x ?? defaultX
+  const y = settings.taskListPosition?.y ?? defaultY
+
+  const isMac = process.platform === "darwin"
+
+  taskListWindow = new BrowserWindow({
+    width: TASK_LIST_WIDTH,
+    height: TASK_LIST_HEIGHT,
+    x,
+    y,
+    transparent: isMac,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: true,
+    movable: true,
+    focusable: true,
+    hasShadow: true,
+    backgroundColor: isMac ? "#00000000" : "#0a0a0f",
+    roundedCorners: true,
+    minWidth: 280,
+    minHeight: TASK_LIST_MIN_HEIGHT,
+    maxHeight: TASK_LIST_MAX_HEIGHT,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload.js")
+    }
+  })
+
+  const taskUrl = isDev
+    ? "http://localhost:5173/tasks.html"
+    : `file://${path.join(__dirname, "../renderer/tasks.html")}`
+
+  taskListWindow.loadURL(taskUrl)
+  taskListWindow.hide()
+
+  // Save position when moved
+  taskListWindow.on("moved", () => {
+    if (taskListWindow) {
+      const [x, y] = taskListWindow.getPosition()
+      const settings = loadSettings()
+      settings.taskListPosition = { x, y }
+      saveSettings(settings)
+    }
+  })
+
+  taskListWindow.on("closed", () => {
+    taskListWindow = null
+    isTaskListVisible = false
+  })
+}
+
+function showTaskList() {
+  if (!taskListWindow) {
+    createTaskListWindow()
+  }
+  taskListWindow?.show()
+  isTaskListVisible = true
+}
+
+function hideTaskList() {
+  taskListWindow?.hide()
+  isTaskListVisible = false
+}
+
+function toggleTaskList() {
+  if (isTaskListVisible) {
+    hideTaskList()
+  } else {
+    showTaskList()
+  }
+}
+
+// Dynamic Island Window - Hover-activated contextual AI
+function createDynamicIslandWindow() {
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width } = primaryDisplay.workAreaSize
+  const menuBarHeight = primaryDisplay.workArea.y || 25
+
+  const isMac = process.platform === "darwin"
+
+  dynamicIslandWindow = new BrowserWindow({
+    width: ISLAND_WIDTH_PILL,
+    height: ISLAND_HEIGHT_PILL,
+    x: Math.round((width - ISLAND_WIDTH_PILL) / 2),
+    y: menuBarHeight + 4,
+    transparent: isMac,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    hasShadow: true,
+    backgroundColor: isMac ? "#00000000" : "#0a0a0f",
+    roundedCorners: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload.js")
+    }
+  })
+
+  const islandUrl = isDev
+    ? "http://localhost:5173/island.html"
+    : `file://${path.join(__dirname, "../renderer/island.html")}`
+
+  dynamicIslandWindow.loadURL(islandUrl)
+  dynamicIslandWindow.hide()
+
+  dynamicIslandWindow.on("blur", () => {
+    if (islandState === 'expanded') {
+      collapseDynamicIsland()
+    }
+  })
+
+  dynamicIslandWindow.on("closed", () => {
+    dynamicIslandWindow = null
+    isDynamicIslandVisible = false
+    islandState = 'hidden'
+  })
+}
+
+function showDynamicIslandPill() {
+  if (!dynamicIslandWindow) return
+
+  islandState = 'pill'
+  isDynamicIslandVisible = true
+
+  // Reset to pill size
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width } = primaryDisplay.workAreaSize
+  const menuBarHeight = primaryDisplay.workArea.y || 25
+
+  dynamicIslandWindow.setSize(ISLAND_WIDTH_PILL, ISLAND_HEIGHT_PILL)
+  dynamicIslandWindow.setPosition(
+    Math.round((width - ISLAND_WIDTH_PILL) / 2),
+    menuBarHeight + 4
+  )
+  dynamicIslandWindow.setFocusable(false)
+  dynamicIslandWindow.show()
+
+  dynamicIslandWindow.webContents.send("island-state", { state: 'pill' })
+}
+
+function expandDynamicIsland(context?: any) {
+  if (!dynamicIslandWindow) return
+
+  islandState = 'expanded'
+
+  const primaryDisplay = screen.getPrimaryDisplay()
+  const { width } = primaryDisplay.workAreaSize
+  const menuBarHeight = primaryDisplay.workArea.y || 25
+
+  // Expand with animation
+  dynamicIslandWindow.setFocusable(true)
+  dynamicIslandWindow.setSize(ISLAND_WIDTH_EXPANDED, ISLAND_HEIGHT_EXPANDED)
+  dynamicIslandWindow.setPosition(
+    Math.round((width - ISLAND_WIDTH_EXPANDED) / 2),
+    menuBarHeight + 4
+  )
+  dynamicIslandWindow.focus()
+
+  dynamicIslandWindow.webContents.send("island-state", {
+    state: 'expanded',
+    context
+  })
+}
+
+function collapseDynamicIsland() {
+  if (!dynamicIslandWindow) return
+
+  // Start dismiss timer
+  dynamicIslandDismissTimer = setTimeout(() => {
+    hideDynamicIsland()
+  }, 300)
+
+  islandState = 'pill'
+  showDynamicIslandPill()
+}
+
+function hideDynamicIsland() {
+  if (!dynamicIslandWindow) return
+
+  islandState = 'hidden'
+  isDynamicIslandVisible = false
+  dynamicIslandWindow.hide()
+}
+
+// Dynamic Island hover detection
+function startDynamicIslandMonitoring() {
+  setInterval(() => {
+    const mousePos = screen.getCursorScreenPoint()
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const menuBarHeight = primaryDisplay.workArea.y || 25
+    const { width } = primaryDisplay.workAreaSize
+
+    // Detection zone: top 30px, center 50% of screen
+    const centerStart = width * 0.25
+    const centerEnd = width * 0.75
+
+    const isInHoverZone = (
+      mousePos.y <= menuBarHeight + 25 &&
+      mousePos.x >= centerStart &&
+      mousePos.x <= centerEnd
+    )
+
+    if (isInHoverZone && islandState === 'hidden' && !isWidgetVisible) {
+      // Clear any pending dismiss timer
+      if (dynamicIslandDismissTimer) {
+        clearTimeout(dynamicIslandDismissTimer)
+        dynamicIslandDismissTimer = null
+      }
+
+      // Show pill after brief delay
+      if (!dynamicIslandHoverTimer) {
+        dynamicIslandHoverTimer = setTimeout(() => {
+          showDynamicIslandPill()
+          dynamicIslandHoverTimer = null
+        }, 150)
+      }
+    } else if (isInHoverZone && islandState === 'pill') {
+      // Start expansion timer if dwelling in pill state
+      if (!dynamicIslandHoverTimer) {
+        dynamicIslandHoverTimer = setTimeout(async () => {
+          // Capture screen context before expanding
+          const screenshot = await captureScreen()
+          expandDynamicIsland({ screenshot })
+          dynamicIslandHoverTimer = null
+        }, 400)
+      }
+    } else if (!isInHoverZone) {
+      // Clear hover timer
+      if (dynamicIslandHoverTimer) {
+        clearTimeout(dynamicIslandHoverTimer)
+        dynamicIslandHoverTimer = null
+      }
+
+      // Start dismiss timer if visible
+      if (isDynamicIslandVisible && islandState !== 'hidden') {
+        if (!dynamicIslandDismissTimer) {
+          dynamicIslandDismissTimer = setTimeout(() => {
+            hideDynamicIsland()
+            dynamicIslandDismissTimer = null
+          }, 500)
+        }
+      }
+    }
+  }, 50)
+}
+
 function createTray() {
   const iconPath = path.join(__dirname, "../../assets/icon.png")
   let trayIcon: nativeImage
@@ -238,6 +521,20 @@ function updateTrayMenu() {
       label: "Screenshot & Ask",
       accelerator: "CommandOrControl+Shift+S",
       click: () => captureAndAsk()
+    },
+    { type: "separator" },
+    {
+      label: "Quick Task",
+      accelerator: "CommandOrControl+Shift+T",
+      click: () => {
+        showWidget()
+        widgetWindow?.webContents.send("quick-task-capture")
+      }
+    },
+    {
+      label: "Task List",
+      accelerator: "CommandOrControl+Shift+L",
+      click: () => toggleTaskList()
     },
     { type: "separator" },
     {
@@ -463,6 +760,20 @@ function registerGlobalShortcuts() {
     if (isWidgetVisible) {
       hideWidget()
     }
+    if (isDynamicIslandVisible) {
+      hideDynamicIsland()
+    }
+  })
+
+  // Quick task capture
+  globalShortcut.register("CommandOrControl+Shift+T", () => {
+    showWidget()
+    widgetWindow?.webContents.send("quick-task-capture")
+  })
+
+  // Toggle task list
+  globalShortcut.register("CommandOrControl+Shift+L", () => {
+    toggleTaskList()
   })
 }
 
@@ -529,6 +840,45 @@ function setupIpcHandlers() {
 
   ipcMain.handle("get-widget-mode", () => {
     return isCompactMode ? "compact" : "expanded"
+  })
+
+  // Task list IPC handlers
+  ipcMain.on("task-list:show", () => showTaskList())
+  ipcMain.on("task-list:hide", () => hideTaskList())
+  ipcMain.on("task-list:toggle", () => toggleTaskList())
+
+  ipcMain.handle("task-list:get-visible", () => isTaskListVisible)
+
+  ipcMain.on("task-list:minimize", () => {
+    taskListWindow?.minimize()
+  })
+
+  ipcMain.on("task-list:resize", (_, { height }: { height: number }) => {
+    if (taskListWindow) {
+      const [width] = taskListWindow.getSize()
+      const clampedHeight = Math.max(TASK_LIST_MIN_HEIGHT, Math.min(height, TASK_LIST_MAX_HEIGHT))
+      taskListWindow.setSize(width, clampedHeight)
+    }
+  })
+
+  // Dynamic Island IPC handlers
+  ipcMain.on("island:expand", (_, context?: any) => expandDynamicIsland(context))
+  ipcMain.on("island:collapse", () => collapseDynamicIsland())
+  ipcMain.on("island:hide", () => hideDynamicIsland())
+  ipcMain.on("island:set-mode", (_, mode: string) => {
+    dynamicIslandWindow?.webContents.send("island-mode", mode)
+  })
+
+  ipcMain.handle("island:get-state", () => islandState)
+
+  // Quick task capture from any context
+  ipcMain.on("quick-task-capture", () => {
+    if (isDynamicIslandVisible && islandState === 'expanded') {
+      dynamicIslandWindow?.webContents.send("island-mode", 'task-capture')
+    } else {
+      showWidget()
+      widgetWindow?.webContents.send("quick-task-capture")
+    }
   })
 }
 
@@ -617,13 +967,24 @@ app.whenReady().then(() => {
   }
 
   createWidgetWindow()
+  createTaskListWindow()
+  createDynamicIslandWindow()
   createTray()
   registerGlobalShortcuts()
   setupIpcHandlers()
   setupAutoUpdater()
 
+  // Start dynamic island hover monitoring
+  startDynamicIslandMonitoring()
+
   // Enable edge activation by default
   toggleEdgeActivation(true)
+
+  // Restore task list visibility if it was open
+  const settings = loadSettings()
+  if (settings.taskListVisible) {
+    showTaskList()
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -641,6 +1002,17 @@ app.on("will-quit", () => {
   if (mouseEdgeCheckInterval) {
     clearInterval(mouseEdgeCheckInterval)
   }
+  if (dynamicIslandHoverTimer) {
+    clearTimeout(dynamicIslandHoverTimer)
+  }
+  if (dynamicIslandDismissTimer) {
+    clearTimeout(dynamicIslandDismissTimer)
+  }
+
+  // Save task list state
+  const settings = loadSettings()
+  settings.taskListVisible = isTaskListVisible
+  saveSettings(settings)
 })
 
 app.on("window-all-closed", () => {

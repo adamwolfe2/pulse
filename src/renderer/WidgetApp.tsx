@@ -30,6 +30,8 @@ import { getTimeContext, getContextualQuickActions, trackInteraction } from "./l
 import { readClipboard, formatClipboardForContext } from "./lib/clipboard"
 import { getStoredModelId, setStoredModelId, getDefaultModel } from "./lib/models"
 import { initializeTrial, getLicenseStatus, canPerformAction } from "./lib/licensing"
+import { useTaskStore } from "./stores/taskStore"
+import { QuickTaskCapture } from "./components/QuickTaskCapture"
 
 interface Message {
   id: string
@@ -109,11 +111,13 @@ export function WidgetApp() {
   const [isCompactMode, setIsCompactMode] = useState(false)
   const [activePersona, setActivePersona] = useState<Persona>(getActivePersona())
   const [droppedFiles, setDroppedFiles] = useState<DroppedFile[]>([])
+  const [showQuickTaskCapture, setShowQuickTaskCapture] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
   const { settings, updateSettings } = usePulseStore()
   const toast = useToast()
+  const { addTask, toggleTaskList, startSprint, endSprint, activeSprint, clearCompleted } = useTaskStore()
 
   // Global keyboard shortcuts
   const shortcuts = useMemo(() => ({
@@ -199,6 +203,11 @@ export function WidgetApp() {
 
     window.pulse?.onWidgetModeChanged?.((data) => {
       setIsCompactMode(data.mode === "compact")
+    })
+
+    // Quick task capture trigger (from global shortcut)
+    window.pulse?.onQuickTaskCapture?.(() => {
+      setShowQuickTaskCapture(true)
     })
 
     return () => {
@@ -437,6 +446,34 @@ export function WidgetApp() {
               setInputValue(prev => prev + " " + formatted)
             })
             break
+          // Task commands
+          case "ADD_TASK":
+            if (result.payload) {
+              addTask(result.payload, 'keyboard')
+              toast.success("Task added", result.payload)
+            } else {
+              setShowQuickTaskCapture(true)
+            }
+            break
+          case "TOGGLE_TASK_LIST":
+            toggleTaskList()
+            break
+          case "START_SPRINT":
+            const sprint = startSprint(result.payload || undefined)
+            toast.success("Sprint started", sprint.name)
+            break
+          case "END_SPRINT":
+            if (activeSprint) {
+              endSprint(activeSprint.id)
+              toast.info("Sprint ended", activeSprint.name)
+            } else {
+              toast.warning("No active sprint", "Start a sprint with /sprint")
+            }
+            break
+          case "CLEAR_COMPLETED_TASKS":
+            clearCompleted()
+            toast.info("Cleared completed tasks")
+            break
         }
         if (result.clearInput) setInputValue("")
         break
@@ -639,6 +676,12 @@ export function WidgetApp() {
     <>
       {/* Settings Modal */}
       <SettingsWindow isOpen={showSettings} onClose={() => setShowSettings(false)} />
+
+      {/* Quick Task Capture */}
+      <QuickTaskCapture
+        isOpen={showQuickTaskCapture}
+        onClose={() => setShowQuickTaskCapture(false)}
+      />
 
       {/* Keyboard Shortcuts Panel */}
       <KeyboardShortcutsPanel isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
