@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Key, Shield, Sparkles, MessageSquare, Camera, Mic, ArrowRight, Check, ExternalLink } from "lucide-react"
+import { Key, Shield, Sparkles, MessageSquare, Camera, Mic, ArrowRight, Check, ExternalLink, ListTodo, Zap } from "lucide-react"
 import { Logo } from "../Logo"
 import { usePulseStore } from "../../stores/pulseStore"
 
@@ -382,6 +382,18 @@ function FeaturesStep({ onNext }: { onNext: () => void }) {
       shortcut: "⌘⇧V"
     },
     {
+      icon: <ListTodo size={20} />,
+      title: "Quick Tasks",
+      description: "Capture tasks instantly from anywhere",
+      shortcut: "⌘⇧T"
+    },
+    {
+      icon: <Zap size={20} />,
+      title: "Focus Sprints",
+      description: "Group tasks into timed work sessions",
+      shortcut: "/sprint"
+    },
+    {
       icon: <Sparkles size={20} />,
       title: "Proactive Help",
       description: "Get suggestions based on what you're working on",
@@ -540,6 +552,12 @@ function PermissionsStep({ onNext }: { onNext: () => void }) {
 }
 
 function CompleteStep({ onFinish }: { onFinish: () => void }) {
+  const shortcuts = [
+    { keys: "⌘⇧G", desc: "Open Pulse" },
+    { keys: "⌘⇧T", desc: "Quick task" },
+    { keys: "⌘⇧S", desc: "Screenshot" },
+  ]
+
   return (
     <div className="text-center">
       <motion.div
@@ -572,26 +590,43 @@ function CompleteStep({ onFinish }: { onFinish: () => void }) {
         initial={{ y: 10, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.3 }}
-        className="text-white/60 mb-6 max-w-sm mx-auto"
+        className="text-white/60 mb-5 max-w-sm mx-auto"
       >
-        Pulse is ready to help. Press <kbd className="px-2 py-0.5 rounded bg-white/10 text-white/80 font-mono text-sm">⌘⇧G</kbd> anytime to summon your AI assistant.
+        Pulse is ready to help you work smarter. Here are some quick shortcuts to get started:
       </motion.p>
 
       <motion.div
         initial={{ y: 10, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.4 }}
+        className="flex justify-center gap-3 mb-5"
+      >
+        {shortcuts.map((s, i) => (
+          <div
+            key={s.keys}
+            className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-center"
+          >
+            <kbd className="block text-white/90 font-mono text-sm mb-1">{s.keys}</kbd>
+            <span className="text-white/40 text-xs">{s.desc}</span>
+          </div>
+        ))}
+      </motion.div>
+
+      <motion.div
+        initial={{ y: 10, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.5 }}
         className="p-4 rounded-xl bg-white/5 border border-white/10 mb-6"
       >
         <p className="text-white/70 text-sm">
-          Pulse lives in your menu bar. Right-click the icon to access settings and enable proactive mode.
+          Pulse lives in your menu bar. Hover near the top of your screen for quick access, or right-click the icon for settings.
         </p>
       </motion.div>
 
       <motion.button
         initial={{ y: 10, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.5 }}
+        transition={{ delay: 0.6 }}
         onClick={onFinish}
         className="px-8 py-3 rounded-xl text-white font-medium"
         style={{

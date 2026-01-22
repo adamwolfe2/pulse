@@ -12,7 +12,9 @@ export default defineConfig({
     chunkSizeWarningLimit: 800,
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, "src/renderer/index.html")
+        main: path.resolve(__dirname, "src/renderer/index.html"),
+        tasks: path.resolve(__dirname, "src/renderer/tasks.html"),
+        island: path.resolve(__dirname, "src/renderer/island.html")
       },
       output: {
         manualChunks: {

@@ -14,6 +14,7 @@ export interface CommandResult {
   type: "prompt" | "action" | "insert"
   value: string
   clearInput?: boolean
+  payload?: string
 }
 
 // Built-in slash commands
@@ -173,6 +174,67 @@ export const slashCommands: Command[] = [
       type: "prompt",
       value: args ? `Help me brainstorm ideas about: ${args}` : "What topic would you like to brainstorm about?",
       clearInput: false
+    })
+  },
+  // Task commands
+  {
+    id: "task",
+    name: "task",
+    description: "Add a task to your focus list",
+    prefix: "/",
+    aliases: ["t", "todo", "add"],
+    action: (args) => ({
+      type: "action",
+      value: "ADD_TASK",
+      clearInput: true,
+      payload: args
+    })
+  },
+  {
+    id: "tasks",
+    name: "tasks",
+    description: "Show/hide floating task list",
+    prefix: "/",
+    aliases: ["tasklist", "tl"],
+    action: () => ({
+      type: "action",
+      value: "TOGGLE_TASK_LIST",
+      clearInput: true
+    })
+  },
+  {
+    id: "sprint",
+    name: "sprint",
+    description: "Start a new focus sprint",
+    prefix: "/",
+    aliases: ["focus"],
+    action: (args) => ({
+      type: "action",
+      value: "START_SPRINT",
+      clearInput: true,
+      payload: args
+    })
+  },
+  {
+    id: "endsprint",
+    name: "endsprint",
+    description: "End current focus sprint",
+    prefix: "/",
+    action: () => ({
+      type: "action",
+      value: "END_SPRINT",
+      clearInput: true
+    })
+  },
+  {
+    id: "cleartasks",
+    name: "cleartasks",
+    description: "Clear completed tasks",
+    prefix: "/",
+    action: () => ({
+      type: "action",
+      value: "CLEAR_COMPLETED_TASKS",
+      clearInput: true
     })
   }
 ]
