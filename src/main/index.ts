@@ -453,17 +453,17 @@ function startDynamicIslandMonitoring() {
         dynamicIslandHoverTimer = null
       }
 
-      // Start dismiss timer if visible
+      // Hide immediately when mouse leaves
       if (isDynamicIslandVisible && islandState !== 'hidden') {
         if (!dynamicIslandDismissTimer) {
           dynamicIslandDismissTimer = setTimeout(() => {
             hideDynamicIsland()
             dynamicIslandDismissTimer = null
-          }, 500)
+          }, 100) // Fast dismiss - feels instant
         }
       }
     }
-  }, 50)
+  }, 30) // Faster polling for responsive feel
 }
 
 function createTray() {
