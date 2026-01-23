@@ -391,9 +391,13 @@ function hideDynamicIsland() {
   dynamicIslandWindow.hide()
 }
 
-// Dynamic Island hover detection
+// Dynamic Island hover detection with adaptive polling
+// Uses adaptive polling: faster when mouse is near, slower when far
+let islandPollingInterval: NodeJS.Timeout | null = null
+let islandPollingRate = TIMING.POLLING.HOVER_DETECTION
+
 function startDynamicIslandMonitoring() {
-  setInterval(() => {
+  const checkMousePosition = () => {
     const mousePos = screen.getCursorScreenPoint()
     const primaryDisplay = screen.getPrimaryDisplay()
     const menuBarHeight = primaryDisplay.workArea.y || 25
@@ -403,11 +407,28 @@ function startDynamicIslandMonitoring() {
     const centerStart = width * 0.25
     const centerEnd = width * 0.75
 
+    // Extended detection zone for adaptive polling
+    const isNearTopEdge = mousePos.y <= menuBarHeight + 100
+    const isInHorizontalRange = mousePos.x >= centerStart - 100 && mousePos.x <= centerEnd + 100
+
     const isInHoverZone = (
       mousePos.y <= menuBarHeight + 25 &&
       mousePos.x >= centerStart &&
       mousePos.x <= centerEnd
     )
+
+    // Adaptive polling: speed up when mouse is near detection area
+    const shouldPollFast = isNearTopEdge && isInHorizontalRange
+    const newPollingRate = shouldPollFast ? 30 : 100
+
+    if (newPollingRate !== islandPollingRate) {
+      islandPollingRate = newPollingRate
+      // Restart interval with new rate
+      if (islandPollingInterval) {
+        clearInterval(islandPollingInterval)
+        islandPollingInterval = setInterval(checkMousePosition, islandPollingRate)
+      }
+    }
 
     if (isInHoverZone && islandState === 'hidden' && !isWidgetVisible) {
       // Clear any pending dismiss timer
@@ -421,7 +442,7 @@ function startDynamicIslandMonitoring() {
         dynamicIslandHoverTimer = setTimeout(() => {
           showDynamicIslandPill()
           dynamicIslandHoverTimer = null
-        }, 150)
+        }, TIMING.TIMEOUT.HOVER_SHOW)
       }
     } else if (isInHoverZone && islandState === 'pill') {
       // Start expansion timer if dwelling in pill state
@@ -431,7 +452,7 @@ function startDynamicIslandMonitoring() {
           const screenshot = await captureScreen()
           expandDynamicIsland({ screenshot })
           dynamicIslandHoverTimer = null
-        }, 400)
+        }, TIMING.TIMEOUT.HOVER_EXPAND)
       }
     } else if (!isInHoverZone) {
       // Clear hover timer
@@ -446,11 +467,14 @@ function startDynamicIslandMonitoring() {
           dynamicIslandDismissTimer = setTimeout(() => {
             hideDynamicIsland()
             dynamicIslandDismissTimer = null
-          }, 100) // Fast dismiss - feels instant
+          }, TIMING.TIMEOUT.DISMISS_DELAY)
         }
       }
     }
-  }, 30) // Faster polling for responsive feel
+  }
+
+  // Start with slower polling, will adapt when mouse approaches
+  islandPollingInterval = setInterval(checkMousePosition, islandPollingRate)
 }
 
 function createTray() {
@@ -635,6 +659,7 @@ function hideWidget() {
 }
 
 // Edge activation - show widget when mouse moves to top edge
+// Uses centralized timing constants
 function toggleEdgeActivation(enabled: boolean) {
   if (enabled && !mouseEdgeCheckInterval) {
     mouseEdgeCheckInterval = setInterval(() => {
@@ -654,7 +679,7 @@ function toggleEdgeActivation(enabled: boolean) {
       ) {
         showWidget()
       }
-    }, 100)
+    }, TIMING.POLLING.EDGE_ACTIVATION)
   } else if (!enabled && mouseEdgeCheckInterval) {
     clearInterval(mouseEdgeCheckInterval)
     mouseEdgeCheckInterval = null
@@ -667,7 +692,7 @@ function toggleProactiveMode(enabled: boolean) {
   isProactiveEnabled = enabled
 
   if (enabled && !proactiveInterval) {
-    // Show proactive suggestion every 30 seconds when enabled
+    // Show proactive suggestion periodically when enabled
     proactiveInterval = setInterval(async () => {
       if (!isWidgetVisible) {
         // Capture screen for context
@@ -677,9 +702,9 @@ function toggleProactiveMode(enabled: boolean) {
           widgetWindow?.webContents.send("proactive-trigger", { screenshot })
         }
       }
-    }, 30000)
+    }, TIMING.INTERVALS.PROACTIVE_SUGGESTION)
 
-    // Initial trigger after 5 seconds
+    // Initial trigger after delay
     setTimeout(async () => {
       if (isProactiveEnabled && !isWidgetVisible) {
         const screenshot = await captureScreen()
@@ -688,7 +713,7 @@ function toggleProactiveMode(enabled: boolean) {
           widgetWindow?.webContents.send("proactive-trigger", { screenshot })
         }
       }
-    }, 5000)
+    }, TIMING.INTERVALS.PROACTIVE_INITIAL)
   } else if (!enabled && proactiveInterval) {
     clearInterval(proactiveInterval)
     proactiveInterval = null
@@ -934,12 +959,12 @@ function setupAutoUpdater() {
     autoUpdater.quitAndInstall(false, true)
   })
 
-  // Check for updates periodically in production (every 4 hours)
+  // Check for updates periodically in production
   if (!isDev) {
     autoUpdater.checkForUpdatesAndNotify()
     setInterval(() => {
       autoUpdater.checkForUpdatesAndNotify()
-    }, 4 * 60 * 60 * 1000)
+    }, TIMING.POLLING.AUTO_UPDATE)
   }
 }
 
@@ -988,6 +1013,9 @@ app.on("will-quit", () => {
   }
   if (mouseEdgeCheckInterval) {
     clearInterval(mouseEdgeCheckInterval)
+  }
+  if (islandPollingInterval) {
+    clearInterval(islandPollingInterval)
   }
   if (dynamicIslandHoverTimer) {
     clearTimeout(dynamicIslandHoverTimer)
