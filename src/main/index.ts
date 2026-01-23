@@ -14,6 +14,8 @@ import {
 import * as path from "path"
 import * as fs from "fs"
 import { autoUpdater } from "electron-updater"
+import { WINDOW, TIMING, SHORTCUTS } from "../shared/constants"
+import type { DynamicIslandState, WindowPosition } from "../shared/types"
 
 // Optional imports - may fail if native modules aren't compiled
 let initializeKeyVault: () => void = () => {}
@@ -42,26 +44,11 @@ let isProactiveEnabled = false
 let mouseEdgeCheckInterval: NodeJS.Timeout | null = null
 let dynamicIslandHoverTimer: NodeJS.Timeout | null = null
 let dynamicIslandDismissTimer: NodeJS.Timeout | null = null
-let islandState: 'hidden' | 'pill' | 'expanded' = 'hidden'
-
-// Widget dimensions - compact like Nook/Atoll
-const WIDGET_WIDTH = 420
-const WIDGET_HEIGHT = 380
-const WIDGET_HEIGHT_COMPACT = 72
-const WIDGET_MARGIN = 8
+let islandState: DynamicIslandState = 'hidden'
 let isCompactMode = false
 
-// Task list window dimensions
-const TASK_LIST_WIDTH = 320
-const TASK_LIST_HEIGHT = 400
-const TASK_LIST_MIN_HEIGHT = 150
-const TASK_LIST_MAX_HEIGHT = 600
-
-// Dynamic Island dimensions
-const ISLAND_WIDTH_PILL = 160
-const ISLAND_HEIGHT_PILL = 36
-const ISLAND_WIDTH_EXPANDED = 380
-const ISLAND_HEIGHT_EXPANDED = 280
+// Use centralized constants for window dimensions
+const { WIDGET, TASK_LIST, DYNAMIC_ISLAND } = WINDOW
 
 // Window position memory
 const SETTINGS_FILE = path.join(app.getPath("userData"), "pulse-settings.json")
@@ -108,15 +95,15 @@ function getWidgetPosition() {
   if (settings.windowPosition && settings.lastDisplay === primaryDisplay.id.toString()) {
     const { x, y } = settings.windowPosition
     // Validate position is still on screen
-    if (x >= 0 && x + WIDGET_WIDTH <= width && y >= menuBarHeight && y + WIDGET_HEIGHT <= height) {
+    if (x >= 0 && x + WIDGET.WIDTH <= width && y >= menuBarHeight && y + WIDGET.HEIGHT <= height) {
       return { x, y }
     }
   }
 
   // Default: Position centered at top, just below menu bar (like Nook)
   return {
-    x: Math.round((width - WIDGET_WIDTH) / 2),
-    y: menuBarHeight + WIDGET_MARGIN
+    x: Math.round((width - WIDGET.WIDTH) / 2),
+    y: menuBarHeight + WIDGET.MARGIN
   }
 }
 
@@ -139,8 +126,8 @@ function createWidgetWindow() {
   const isMac = process.platform === "darwin"
 
   widgetWindow = new BrowserWindow({
-    width: WIDGET_WIDTH,
-    height: WIDGET_HEIGHT,
+    width: WIDGET.WIDTH,
+    height: WIDGET.HEIGHT,
     x,
     y,
     // Transparency settings - macOS handles this differently
@@ -211,7 +198,7 @@ function createTaskListWindow() {
   const { width, height } = primaryDisplay.workAreaSize
 
   // Default position: right side of screen
-  const defaultX = width - TASK_LIST_WIDTH - 20
+  const defaultX = width - TASK_LIST.WIDTH - 20
   const defaultY = 100
 
   const x = settings.taskListPosition?.x ?? defaultX
@@ -220,8 +207,8 @@ function createTaskListWindow() {
   const isMac = process.platform === "darwin"
 
   taskListWindow = new BrowserWindow({
-    width: TASK_LIST_WIDTH,
-    height: TASK_LIST_HEIGHT,
+    width: TASK_LIST.WIDTH,
+    height: TASK_LIST.HEIGHT,
     x,
     y,
     transparent: isMac,
@@ -235,8 +222,8 @@ function createTaskListWindow() {
     backgroundColor: isMac ? "#00000000" : "#0a0a0f",
     roundedCorners: true,
     minWidth: 280,
-    minHeight: TASK_LIST_MIN_HEIGHT,
-    maxHeight: TASK_LIST_MAX_HEIGHT,
+    minHeight: TASK_LIST.MIN_HEIGHT,
+    maxHeight: TASK_LIST.MAX_HEIGHT,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -297,9 +284,9 @@ function createDynamicIslandWindow() {
   const isMac = process.platform === "darwin"
 
   dynamicIslandWindow = new BrowserWindow({
-    width: ISLAND_WIDTH_PILL,
-    height: ISLAND_HEIGHT_PILL,
-    x: Math.round((width - ISLAND_WIDTH_PILL) / 2),
+    width: DYNAMIC_ISLAND.WIDTH_PILL,
+    height: DYNAMIC_ISLAND.HEIGHT_PILL,
+    x: Math.round((width - DYNAMIC_ISLAND.WIDTH_PILL) / 2),
     y: menuBarHeight + 4,
     transparent: isMac,
     frame: false,
@@ -349,9 +336,9 @@ function showDynamicIslandPill() {
   const { width } = primaryDisplay.workAreaSize
   const menuBarHeight = primaryDisplay.workArea.y || 25
 
-  dynamicIslandWindow.setSize(ISLAND_WIDTH_PILL, ISLAND_HEIGHT_PILL)
+  dynamicIslandWindow.setSize(DYNAMIC_ISLAND.WIDTH_PILL, DYNAMIC_ISLAND.HEIGHT_PILL)
   dynamicIslandWindow.setPosition(
-    Math.round((width - ISLAND_WIDTH_PILL) / 2),
+    Math.round((width - DYNAMIC_ISLAND.WIDTH_PILL) / 2),
     menuBarHeight + 4
   )
   dynamicIslandWindow.setFocusable(false)
@@ -371,9 +358,9 @@ function expandDynamicIsland(context?: any) {
 
   // Expand with animation
   dynamicIslandWindow.setFocusable(true)
-  dynamicIslandWindow.setSize(ISLAND_WIDTH_EXPANDED, ISLAND_HEIGHT_EXPANDED)
+  dynamicIslandWindow.setSize(DYNAMIC_ISLAND.WIDTH_EXPANDED, DYNAMIC_ISLAND.HEIGHT_EXPANDED)
   dynamicIslandWindow.setPosition(
-    Math.round((width - ISLAND_WIDTH_EXPANDED) / 2),
+    Math.round((width - DYNAMIC_ISLAND.WIDTH_EXPANDED) / 2),
     menuBarHeight + 4
   )
   dynamicIslandWindow.focus()
@@ -404,9 +391,13 @@ function hideDynamicIsland() {
   dynamicIslandWindow.hide()
 }
 
-// Dynamic Island hover detection
+// Dynamic Island hover detection with adaptive polling
+// Uses adaptive polling: faster when mouse is near, slower when far
+let islandPollingInterval: NodeJS.Timeout | null = null
+let islandPollingRate = TIMING.POLLING.HOVER_DETECTION
+
 function startDynamicIslandMonitoring() {
-  setInterval(() => {
+  const checkMousePosition = () => {
     const mousePos = screen.getCursorScreenPoint()
     const primaryDisplay = screen.getPrimaryDisplay()
     const menuBarHeight = primaryDisplay.workArea.y || 25
@@ -416,11 +407,28 @@ function startDynamicIslandMonitoring() {
     const centerStart = width * 0.25
     const centerEnd = width * 0.75
 
+    // Extended detection zone for adaptive polling
+    const isNearTopEdge = mousePos.y <= menuBarHeight + 100
+    const isInHorizontalRange = mousePos.x >= centerStart - 100 && mousePos.x <= centerEnd + 100
+
     const isInHoverZone = (
       mousePos.y <= menuBarHeight + 25 &&
       mousePos.x >= centerStart &&
       mousePos.x <= centerEnd
     )
+
+    // Adaptive polling: speed up when mouse is near detection area
+    const shouldPollFast = isNearTopEdge && isInHorizontalRange
+    const newPollingRate = shouldPollFast ? 30 : 100
+
+    if (newPollingRate !== islandPollingRate) {
+      islandPollingRate = newPollingRate
+      // Restart interval with new rate
+      if (islandPollingInterval) {
+        clearInterval(islandPollingInterval)
+        islandPollingInterval = setInterval(checkMousePosition, islandPollingRate)
+      }
+    }
 
     if (isInHoverZone && islandState === 'hidden' && !isWidgetVisible) {
       // Clear any pending dismiss timer
@@ -434,7 +442,7 @@ function startDynamicIslandMonitoring() {
         dynamicIslandHoverTimer = setTimeout(() => {
           showDynamicIslandPill()
           dynamicIslandHoverTimer = null
-        }, 150)
+        }, TIMING.TIMEOUT.HOVER_SHOW)
       }
     } else if (isInHoverZone && islandState === 'pill') {
       // Start expansion timer if dwelling in pill state
@@ -444,7 +452,7 @@ function startDynamicIslandMonitoring() {
           const screenshot = await captureScreen()
           expandDynamicIsland({ screenshot })
           dynamicIslandHoverTimer = null
-        }, 400)
+        }, TIMING.TIMEOUT.HOVER_EXPAND)
       }
     } else if (!isInHoverZone) {
       // Clear hover timer
@@ -459,11 +467,14 @@ function startDynamicIslandMonitoring() {
           dynamicIslandDismissTimer = setTimeout(() => {
             hideDynamicIsland()
             dynamicIslandDismissTimer = null
-          }, 100) // Fast dismiss - feels instant
+          }, TIMING.TIMEOUT.DISMISS_DELAY)
         }
       }
     }
-  }, 30) // Faster polling for responsive feel
+  }
+
+  // Start with slower polling, will adapt when mouse approaches
+  islandPollingInterval = setInterval(checkMousePosition, islandPollingRate)
 }
 
 function createTray() {
@@ -648,6 +659,7 @@ function hideWidget() {
 }
 
 // Edge activation - show widget when mouse moves to top edge
+// Uses centralized timing constants
 function toggleEdgeActivation(enabled: boolean) {
   if (enabled && !mouseEdgeCheckInterval) {
     mouseEdgeCheckInterval = setInterval(() => {
@@ -667,7 +679,7 @@ function toggleEdgeActivation(enabled: boolean) {
       ) {
         showWidget()
       }
-    }, 100)
+    }, TIMING.POLLING.EDGE_ACTIVATION)
   } else if (!enabled && mouseEdgeCheckInterval) {
     clearInterval(mouseEdgeCheckInterval)
     mouseEdgeCheckInterval = null
@@ -680,7 +692,7 @@ function toggleProactiveMode(enabled: boolean) {
   isProactiveEnabled = enabled
 
   if (enabled && !proactiveInterval) {
-    // Show proactive suggestion every 30 seconds when enabled
+    // Show proactive suggestion periodically when enabled
     proactiveInterval = setInterval(async () => {
       if (!isWidgetVisible) {
         // Capture screen for context
@@ -690,9 +702,9 @@ function toggleProactiveMode(enabled: boolean) {
           widgetWindow?.webContents.send("proactive-trigger", { screenshot })
         }
       }
-    }, 30000)
+    }, TIMING.INTERVALS.PROACTIVE_SUGGESTION)
 
-    // Initial trigger after 5 seconds
+    // Initial trigger after delay
     setTimeout(async () => {
       if (isProactiveEnabled && !isWidgetVisible) {
         const screenshot = await captureScreen()
@@ -701,7 +713,7 @@ function toggleProactiveMode(enabled: boolean) {
           widgetWindow?.webContents.send("proactive-trigger", { screenshot })
         }
       }
-    }, 5000)
+    }, TIMING.INTERVALS.PROACTIVE_INITIAL)
   } else if (!enabled && proactiveInterval) {
     clearInterval(proactiveInterval)
     proactiveInterval = null
@@ -826,13 +838,13 @@ function setupIpcHandlers() {
     if (!widgetWindow) return
 
     isCompactMode = mode === "compact"
-    const newHeight = isCompactMode ? WIDGET_HEIGHT_COMPACT : WIDGET_HEIGHT
+    const newHeight = isCompactMode ? WIDGET.HEIGHT_COMPACT : WIDGET.HEIGHT
 
     // Get current position to maintain x position
     const [x, y] = widgetWindow.getPosition()
 
     // Animate height change
-    widgetWindow.setSize(WIDGET_WIDTH, newHeight, true)
+    widgetWindow.setSize(WIDGET.WIDTH, newHeight, true)
 
     // Notify renderer of mode change
     widgetWindow.webContents.send("widget-mode-changed", { mode })
@@ -856,7 +868,7 @@ function setupIpcHandlers() {
   ipcMain.on("task-list:resize", (_, { height }: { height: number }) => {
     if (taskListWindow) {
       const [width] = taskListWindow.getSize()
-      const clampedHeight = Math.max(TASK_LIST_MIN_HEIGHT, Math.min(height, TASK_LIST_MAX_HEIGHT))
+      const clampedHeight = Math.max(TASK_LIST.MIN_HEIGHT, Math.min(height, TASK_LIST.MAX_HEIGHT))
       taskListWindow.setSize(width, clampedHeight)
     }
   })
@@ -947,12 +959,12 @@ function setupAutoUpdater() {
     autoUpdater.quitAndInstall(false, true)
   })
 
-  // Check for updates periodically in production (every 4 hours)
+  // Check for updates periodically in production
   if (!isDev) {
     autoUpdater.checkForUpdatesAndNotify()
     setInterval(() => {
       autoUpdater.checkForUpdatesAndNotify()
-    }, 4 * 60 * 60 * 1000)
+    }, TIMING.POLLING.AUTO_UPDATE)
   }
 }
 
@@ -1001,6 +1013,9 @@ app.on("will-quit", () => {
   }
   if (mouseEdgeCheckInterval) {
     clearInterval(mouseEdgeCheckInterval)
+  }
+  if (islandPollingInterval) {
+    clearInterval(islandPollingInterval)
   }
   if (dynamicIslandHoverTimer) {
     clearTimeout(dynamicIslandHoverTimer)

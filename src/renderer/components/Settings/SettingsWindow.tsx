@@ -1,4 +1,11 @@
-import React, { useState } from "react"
+/**
+ * Settings Window Component
+ *
+ * Accessibility: Implements WCAG 2.1 AA compliance with focus trapping,
+ * ARIA labels, and keyboard navigation support.
+ */
+
+import React, { useState, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Settings,
@@ -17,6 +24,8 @@ import { AccentColorConfig } from "./AccentColorConfig"
 import { KeybindsConfig } from "./KeybindsConfig"
 import { BehaviorConfig } from "./BehaviorConfig"
 import { AboutSection } from "./AboutSection"
+import { useReducedMotion, useEscapeKey } from "../../hooks/useAccessibility"
+import { ANIMATIONS } from "../../../shared/constants"
 
 interface SettingsWindowProps {
   isOpen: boolean
@@ -35,25 +44,51 @@ const tabs: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
 export function SettingsWindow({ isOpen, onClose }: SettingsWindowProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("behavior")
   const { settings } = usePulseStore()
+  const prefersReducedMotion = useReducedMotion()
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  // Close on Escape key
+  useEscapeKey(onClose, isOpen)
+
+  // Focus trap and focus restoration
+  useEffect(() => {
+    if (isOpen && dialogRef.current) {
+      const previousActiveElement = document.activeElement as HTMLElement
+      dialogRef.current.focus()
+
+      return () => {
+        previousActiveElement?.focus()
+      }
+    }
+  }, [isOpen])
+
+  const animationProps = prefersReducedMotion
+    ? {}
+    : { type: "spring" as const, damping: 25, stiffness: 300 }
 
   return (
     <AnimatePresence>
       {isOpen && (
         <motion.div
-          initial={{ opacity: 0 }}
+          initial={prefersReducedMotion ? {} : { opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
+          exit={prefersReducedMotion ? {} : { opacity: 0 }}
           className="fixed inset-0 z-50 flex items-center justify-center"
           style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
           onClick={onClose}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-title"
         >
           <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
+            ref={dialogRef}
+            initial={prefersReducedMotion ? {} : { scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
-            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            exit={prefersReducedMotion ? {} : { scale: 0.95, opacity: 0 }}
+            transition={animationProps}
             onClick={(e) => e.stopPropagation()}
             className="w-[720px] h-[520px] rounded-2xl overflow-hidden flex"
+            tabIndex={-1}
             style={{
               background: "rgba(30, 30, 30, 0.85)",
               backdropFilter: "blur(40px)",
@@ -74,13 +109,13 @@ export function SettingsWindow({ isOpen, onClose }: SettingsWindowProps) {
               <div className="px-3 mb-6 flex items-center gap-3">
                 <Logo size={32} />
                 <div>
-                  <h1 className="text-white/90 font-semibold text-lg">Pulse</h1>
+                  <h1 id="settings-title" className="text-white/90 font-semibold text-lg">Pulse</h1>
                   <p className="text-white/40 text-xs">Settings</p>
                 </div>
               </div>
 
               {/* Navigation */}
-              <nav className="flex-1 space-y-1">
+              <nav className="flex-1 space-y-1" role="tablist" aria-label="Settings navigation">
                 {tabs.map((tab) => (
                   <button
                     key={tab.id}
@@ -96,8 +131,12 @@ export function SettingsWindow({ isOpen, onClose }: SettingsWindowProps) {
                     style={activeTab === tab.id ? {
                       background: `linear-gradient(135deg, ${settings.accentColor || "#6366f1"}, ${settings.accentColor2 || "#8b5cf6"})`,
                     } : {}}
+                    role="tab"
+                    aria-selected={activeTab === tab.id}
+                    aria-controls={`${tab.id}-panel`}
+                    id={`${tab.id}-tab`}
                   >
-                    {tab.icon}
+                    <span aria-hidden="true">{tab.icon}</span>
                     {tab.label}
                   </button>
                 ))}
@@ -119,20 +158,26 @@ export function SettingsWindow({ isOpen, onClose }: SettingsWindowProps) {
                 <button
                   onClick={onClose}
                   className="p-1.5 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors"
+                  aria-label="Close settings"
                 >
-                  <X size={18} />
+                  <X size={18} aria-hidden="true" />
                 </button>
               </div>
 
               {/* Content Area */}
-              <div className="flex-1 overflow-y-auto p-6">
+              <div
+                className="flex-1 overflow-y-auto p-6"
+                role="tabpanel"
+                id={`${activeTab}-panel`}
+                aria-labelledby={`${activeTab}-tab`}
+              >
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={activeTab}
-                    initial={{ opacity: 0, x: 10 }}
+                    initial={prefersReducedMotion ? {} : { opacity: 0, x: 10 }}
                     animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -10 }}
-                    transition={{ duration: 0.15 }}
+                    exit={prefersReducedMotion ? {} : { opacity: 0, x: -10 }}
+                    transition={{ duration: prefersReducedMotion ? 0 : 0.15 }}
                   >
                     {activeTab === "behavior" && <BehaviorConfig />}
                     {activeTab === "appearance" && <AccentColorConfig />}

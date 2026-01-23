@@ -29,12 +29,23 @@ interface PulseState {
     // Appearance
     accentColor: string
     accentColor2: string
+    reducedMotion: boolean
+    compactMode: boolean
     // Behavior
     screenCaptureEnabled: boolean
     proactiveEnabled: boolean
     proactiveInterval: number
     voiceEnabled: boolean
     launchAtLogin: boolean
+    alwaysOnTop: boolean
+    // AI Settings
+    aiTemperature: number
+    aiModel: 'claude-sonnet-4-20250514' | 'claude-3-haiku-20240307'
+    // Notifications
+    notificationsEnabled: boolean
+    soundEnabled: boolean
+    // Privacy
+    analyticsEnabled: boolean
     // Keybinds
     keybinds: Keybind[]
   }
@@ -111,12 +122,23 @@ export const usePulseStore = create<PulseState>((set, get) => {
     // Appearance
     accentColor: storedSettings.accentColor || "#6366f1",
     accentColor2: storedSettings.accentColor2 || "#8b5cf6",
+    reducedMotion: storedSettings.reducedMotion ?? false,
+    compactMode: storedSettings.compactMode ?? false,
     // Behavior
     screenCaptureEnabled: storedSettings.screenCaptureEnabled ?? true,
     proactiveEnabled: storedSettings.proactiveEnabled ?? false,
     proactiveInterval: storedSettings.proactiveInterval ?? 30,
     voiceEnabled: storedSettings.voiceEnabled ?? true,
     launchAtLogin: storedSettings.launchAtLogin ?? false,
+    alwaysOnTop: storedSettings.alwaysOnTop ?? true,
+    // AI Settings
+    aiTemperature: storedSettings.aiTemperature ?? 0.7,
+    aiModel: storedSettings.aiModel ?? 'claude-sonnet-4-20250514',
+    // Notifications
+    notificationsEnabled: storedSettings.notificationsEnabled ?? true,
+    soundEnabled: storedSettings.soundEnabled ?? true,
+    // Privacy
+    analyticsEnabled: storedSettings.analyticsEnabled ?? false,
     // Keybinds
     keybinds: storedSettings.keybinds || defaultKeybinds,
   },

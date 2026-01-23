@@ -1,6 +1,9 @@
 /**
  * Floating Task List - Draggable task widget
  * Displays tasks in a compact, always-on-top window
+ *
+ * Accessibility: Implements WCAG 2.1 AA compliance with ARIA labels,
+ * keyboard navigation, and screen reader support.
  */
 
 import { useState, useRef, useEffect } from 'react'
@@ -21,23 +24,17 @@ import {
 } from 'lucide-react'
 import { useTaskStore } from './stores/taskStore'
 import type { Task } from './lib/tasks'
+import { useReducedMotion } from './hooks/useAccessibility'
+import { ANIMATIONS } from '../shared/constants'
 
-// Animation configs
-const springSmooth = {
-  type: "spring" as const,
-  stiffness: 300,
-  damping: 30,
-  mass: 1
-}
-
-const springBouncy = {
-  type: "spring" as const,
-  stiffness: 400,
-  damping: 17,
-  mass: 1
-}
+// Animation configs using centralized constants
+const springSmooth = ANIMATIONS.SPRING.SMOOTH
+const springBouncy = ANIMATIONS.SPRING.BOUNCY
 
 export function FloatingTaskList() {
+  const prefersReducedMotion = useReducedMotion()
+  const spring = prefersReducedMotion ? { type: "tween" as const, duration: 0 } : springSmooth
+
   const {
     tasks,
     activeSprint,
@@ -101,6 +98,8 @@ export function FloatingTaskList() {
   return (
     <div
       className="h-full flex flex-col overflow-hidden select-none"
+      role="region"
+      aria-label="Task list"
       style={{
         background: 'linear-gradient(180deg, rgba(15,15,20,0.97) 0%, rgba(10,10,15,0.98) 100%)',
         backdropFilter: 'blur(40px) saturate(180%)',
@@ -142,31 +141,38 @@ export function FloatingTaskList() {
           <div className="relative" ref={menuRef}>
             <motion.button
               onClick={() => setShowMenu(!showMenu)}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
+              whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
+              whileTap={prefersReducedMotion ? {} : { scale: 0.9 }}
               className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+              aria-label="Task menu"
+              aria-expanded={showMenu}
+              aria-haspopup="menu"
             >
-              <MoreHorizontal size={14} />
+              <MoreHorizontal size={14} aria-hidden="true" />
             </motion.button>
 
             <AnimatePresence>
               {showMenu && (
                 <motion.div
-                  initial={{ opacity: 0, y: -5, scale: 0.95 }}
+                  initial={prefersReducedMotion ? {} : { opacity: 0, y: -5, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -5, scale: 0.95 }}
+                  exit={prefersReducedMotion ? {} : { opacity: 0, y: -5, scale: 0.95 }}
                   className="absolute right-0 top-full mt-1 z-50 min-w-[160px] py-1
                            bg-[#1a1a1f] border border-white/10 rounded-xl shadow-xl"
+                  role="menu"
+                  aria-label="Task actions"
                 >
                   <button
                     onClick={() => { clearCompleted(); setShowMenu(false) }}
                     className="w-full px-3 py-2 text-left text-sm text-white/70 hover:text-white hover:bg-white/5 transition-colors"
+                    role="menuitem"
                   >
                     Clear completed
                   </button>
                   <button
                     onClick={() => { window.pulse?.taskWindow?.newSprint?.(); setShowMenu(false) }}
                     className="w-full px-3 py-2 text-left text-sm text-white/70 hover:text-white hover:bg-white/5 transition-colors"
+                    role="menuitem"
                   >
                     New sprint...
                   </button>
@@ -177,32 +183,40 @@ export function FloatingTaskList() {
 
           <motion.button
             onClick={handleMinimize}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
+            whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
+            whileTap={prefersReducedMotion ? {} : { scale: 0.9 }}
             className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="Minimize task list"
           >
-            <Minus size={12} />
+            <Minus size={12} aria-hidden="true" />
           </motion.button>
           <motion.button
             onClick={handleClose}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
+            whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
+            whileTap={prefersReducedMotion ? {} : { scale: 0.9 }}
             className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+            aria-label="Close task list"
           >
-            <X size={12} />
+            <X size={12} aria-hidden="true" />
           </motion.button>
         </div>
       </div>
 
       {/* Task list */}
-      <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1 scrollbar-thin scrollbar-thumb-white/10">
+      <div
+        className="flex-1 overflow-y-auto px-2 py-2 space-y-1 scrollbar-thin scrollbar-thumb-white/10"
+        role="list"
+        aria-label={`${visibleTasks.filter(t => !t.completed).length} tasks remaining`}
+      >
         {visibleTasks.length === 0 ? (
           <motion.div
             className="text-center py-8 text-white/30"
-            initial={{ opacity: 0 }}
+            initial={prefersReducedMotion ? {} : { opacity: 0 }}
             animate={{ opacity: 1 }}
+            role="status"
+            aria-label="No tasks"
           >
-            <CheckCircle2 size={32} className="mx-auto mb-2 opacity-50" />
+            <CheckCircle2 size={32} className="mx-auto mb-2 opacity-50" aria-hidden="true" />
             <p className="text-sm">All done!</p>
             <p className="text-xs mt-1">Add a task to get started</p>
           </motion.div>
@@ -212,6 +226,8 @@ export function FloatingTaskList() {
             values={visibleTasks}
             onReorder={handleReorder}
             className="space-y-1"
+            role="listbox"
+            aria-label="Tasks"
           >
             <AnimatePresence mode="popLayout">
               {visibleTasks.map((task, index) => (
@@ -229,14 +245,14 @@ export function FloatingTaskList() {
       </div>
 
       {/* Quick add input */}
-      <div className="p-2 border-t border-white/5">
+      <div className="p-2 border-t border-white/5" role="form" aria-label="Add new task">
         <AnimatePresence mode="wait">
           {isAddingTask ? (
             <motion.div
               key="input"
-              initial={{ opacity: 0, y: 10 }}
+              initial={prefersReducedMotion ? {} : { opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
+              exit={prefersReducedMotion ? {} : { opacity: 0, y: 10 }}
               className="flex items-center gap-2"
             >
               <input
@@ -259,31 +275,35 @@ export function FloatingTaskList() {
                 className="flex-1 bg-white/5 text-white placeholder-white/30 rounded-lg
                          px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30
                          border border-white/10"
+                aria-label="New task description"
               />
               <motion.button
                 onClick={handleAddTask}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
+                whileHover={prefersReducedMotion ? {} : { scale: 1.05 }}
+                whileTap={prefersReducedMotion ? {} : { scale: 0.95 }}
                 disabled={!inputValue.trim()}
                 className="p-2 rounded-lg bg-indigo-500 text-white
                          disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Add task"
+                aria-disabled={!inputValue.trim()}
               >
-                <Plus size={16} />
+                <Plus size={16} aria-hidden="true" />
               </motion.button>
             </motion.div>
           ) : (
             <motion.button
               key="button"
-              initial={{ opacity: 0 }}
+              initial={prefersReducedMotion ? {} : { opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              exit={prefersReducedMotion ? {} : { opacity: 0 }}
               onClick={() => setIsAddingTask(true)}
               className="w-full flex items-center gap-2 px-3 py-2 rounded-lg
                        text-white/40 hover:text-white hover:bg-white/5 transition-colors text-sm"
+              aria-label="Add new task (keyboard shortcut Command+Shift+T)"
             >
-              <Plus size={16} />
+              <Plus size={16} aria-hidden="true" />
               <span>Add task...</span>
-              <kbd className="ml-auto px-1.5 py-0.5 rounded bg-white/5 text-[10px] text-white/30">
+              <kbd className="ml-auto px-1.5 py-0.5 rounded bg-white/5 text-[10px] text-white/30" aria-hidden="true">
                 ⌘⇧T
               </kbd>
             </motion.button>
@@ -293,7 +313,11 @@ export function FloatingTaskList() {
 
       {/* Stats footer */}
       {stats.totalTasks > 0 && (
-        <div className="px-3 py-2 border-t border-white/5 flex items-center justify-between text-[10px] text-white/30">
+        <div
+          className="px-3 py-2 border-t border-white/5 flex items-center justify-between text-[10px] text-white/30"
+          role="status"
+          aria-label={`${stats.completedToday} tasks completed today, ${Math.round(stats.completionRate)}% total completion`}
+        >
           <span>{stats.completedToday} completed today</span>
           <span>{Math.round(stats.completionRate)}% done</span>
         </div>
@@ -314,6 +338,7 @@ function TaskItem({
   onToggle: () => void
   onDelete: () => void
 }) {
+  const prefersReducedMotion = useReducedMotion()
   const [isHovered, setIsHovered] = useState(false)
 
   const getSourceIcon = () => {
@@ -342,17 +367,20 @@ function TaskItem({
     <Reorder.Item
       value={task}
       id={task.id}
-      initial={{ opacity: 0, x: -20 }}
+      initial={prefersReducedMotion ? {} : { opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 20, height: 0, marginBottom: 0 }}
-      transition={{ ...springSmooth, delay: index * 0.02 }}
+      exit={prefersReducedMotion ? {} : { opacity: 0, x: 20, height: 0, marginBottom: 0 }}
+      transition={prefersReducedMotion ? {} : { ...springSmooth, delay: index * 0.02 }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={`group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-grab active:cursor-grabbing
                 hover:bg-white/5 transition-colors ${task.completed ? 'opacity-50' : ''}`}
+      role="option"
+      aria-selected={isHovered}
+      aria-label={`${task.content}${task.completed ? ', completed' : ''}${task.priority !== 'medium' ? `, ${task.priority} priority` : ''}`}
     >
       {/* Drag handle */}
-      <div className="opacity-0 group-hover:opacity-50 transition-opacity cursor-grab">
+      <div className="opacity-0 group-hover:opacity-50 transition-opacity cursor-grab" aria-hidden="true">
         <GripVertical size={12} className="text-white/30" />
       </div>
 
@@ -362,16 +390,19 @@ function TaskItem({
           e.stopPropagation()
           onToggle()
         }}
-        whileHover={{ scale: 1.1 }}
-        whileTap={{ scale: 0.9 }}
+        whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
+        whileTap={prefersReducedMotion ? {} : { scale: 0.9 }}
         className={`w-4 h-4 rounded-full border flex-shrink-0 flex items-center justify-center
                   transition-colors ${
                     task.completed
                       ? 'bg-green-500 border-green-500'
                       : 'border-white/30 hover:border-indigo-500'
                   }`}
+        role="checkbox"
+        aria-checked={task.completed}
+        aria-label={`Mark "${task.content}" as ${task.completed ? 'incomplete' : 'complete'}`}
       >
-        {task.completed && <Check size={10} className="text-white" />}
+        {task.completed && <Check size={10} className="text-white" aria-hidden="true" />}
       </motion.button>
 
       {/* Content */}
@@ -382,7 +413,7 @@ function TaskItem({
       </span>
 
       {/* Indicators */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1" aria-hidden="true">
         {task.priority !== 'medium' && (
           <Flag size={10} className={getPriorityColor()} />
         )}
@@ -393,17 +424,18 @@ function TaskItem({
       <AnimatePresence>
         {isHovered && !task.completed && (
           <motion.button
-            initial={{ opacity: 0, scale: 0.8 }}
+            initial={prefersReducedMotion ? {} : { opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
+            exit={prefersReducedMotion ? {} : { opacity: 0, scale: 0.8 }}
             onClick={(e) => {
               e.stopPropagation()
               onDelete()
             }}
-            whileHover={{ scale: 1.1 }}
+            whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
             className="p-1 rounded text-white/20 hover:text-red-400 transition-colors"
+            aria-label={`Delete "${task.content}"`}
           >
-            <Trash2 size={12} />
+            <Trash2 size={12} aria-hidden="true" />
           </motion.button>
         )}
       </AnimatePresence>
