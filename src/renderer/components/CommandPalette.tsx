@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Command, Hash, AtSign, Slash, ArrowRight } from "lucide-react"
 import { getCommandSuggestions, type Command as CommandType } from "../lib/commands"
+import { useReducedMotion, useAnnounce } from "../hooks/useAccessibility"
+import { ANIMATIONS } from "../../shared/constants"
 
 interface CommandPaletteProps {
   input: string
@@ -14,16 +16,22 @@ export function CommandPalette({ input, isVisible, onSelect, onClose }: CommandP
   const [suggestions, setSuggestions] = useState<CommandType[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
+  const prefersReducedMotion = useReducedMotion()
+  const { announce } = useAnnounce()
 
   useEffect(() => {
     if (isVisible && input) {
       const cmds = getCommandSuggestions(input, 6)
       setSuggestions(cmds)
       setSelectedIndex(0)
+      // Announce to screen readers
+      if (cmds.length > 0) {
+        announce(`${cmds.length} command${cmds.length === 1 ? '' : 's'} available`)
+      }
     } else {
       setSuggestions([])
     }
-  }, [input, isVisible])
+  }, [input, isVisible, announce])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -82,11 +90,14 @@ export function CommandPalette({ input, isVisible, onSelect, onClose }: CommandP
   return (
     <AnimatePresence>
       <motion.div
-        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+        initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-        transition={{ duration: 0.15 }}
+        exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.95 }}
+        transition={{ duration: prefersReducedMotion ? 0 : ANIMATIONS.DURATION.FAST }}
         className="absolute bottom-full left-0 right-0 mb-2 mx-2 overflow-hidden rounded-xl"
+        role="listbox"
+        aria-label="Command suggestions"
+        aria-activedescendant={suggestions[selectedIndex] ? `cmd-${suggestions[selectedIndex].id}` : undefined}
         style={{
           background: "rgba(25, 25, 30, 0.98)",
           border: "1px solid rgba(255, 255, 255, 0.1)",
@@ -94,17 +105,18 @@ export function CommandPalette({ input, isVisible, onSelect, onClose }: CommandP
         }}
       >
         {/* Header */}
-        <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
-          <Command size={14} className="text-white/40" />
-          <span className="text-xs text-white/50">Quick Commands</span>
-          <span className="text-xs text-white/30 ml-auto">↑↓ to navigate • Enter to select</span>
+        <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2" role="presentation">
+          <Command size={14} className="text-white/40" aria-hidden="true" />
+          <span className="text-xs text-white/50" id="command-palette-label">Quick Commands</span>
+          <span className="text-xs text-white/30 ml-auto" aria-hidden="true">↑↓ to navigate • Enter to select</span>
         </div>
 
         {/* Suggestions list */}
-        <div ref={listRef} className="max-h-[200px] overflow-y-auto py-1">
+        <div ref={listRef} className="max-h-[200px] overflow-y-auto py-1" role="presentation">
           {suggestions.map((cmd, index) => (
             <button
               key={cmd.id}
+              id={`cmd-${cmd.id}`}
               onClick={() => {
                 const args = input.slice(cmd.name.length + 1).trim()
                 onSelect(cmd, args)
@@ -114,8 +126,11 @@ export function CommandPalette({ input, isVisible, onSelect, onClose }: CommandP
                   ? "bg-white/10 text-white"
                   : "text-white/70 hover:bg-white/5"
                 }`}
+              role="option"
+              aria-selected={index === selectedIndex}
+              aria-label={`${cmd.prefix}${cmd.name}: ${cmd.description}`}
             >
-              <div className="w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center">
+              <div className="w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center" aria-hidden="true">
                 {getPrefixIcon(cmd.prefix)}
               </div>
               <div className="flex-1 min-w-0">
@@ -124,7 +139,7 @@ export function CommandPalette({ input, isVisible, onSelect, onClose }: CommandP
                     {cmd.prefix}{cmd.name}
                   </span>
                   {cmd.aliases && cmd.aliases.length > 0 && (
-                    <span className="text-xs text-white/30">
+                    <span className="text-xs text-white/30" aria-hidden="true">
                       ({cmd.aliases.map(a => cmd.prefix + a).join(", ")})
                     </span>
                   )}
@@ -132,7 +147,7 @@ export function CommandPalette({ input, isVisible, onSelect, onClose }: CommandP
                 <p className="text-xs text-white/40 truncate">{cmd.description}</p>
               </div>
               {index === selectedIndex && (
-                <ArrowRight size={14} className="text-white/40" />
+                <ArrowRight size={14} className="text-white/40" aria-hidden="true" />
               )}
             </button>
           ))}
@@ -156,7 +171,7 @@ export function CommandHint({ input }: { input: string }) {
   if (!suggestion.name.startsWith(typed)) return null
 
   return (
-    <span className="text-white/20 pointer-events-none">
+    <span className="text-white/20 pointer-events-none" aria-hidden="true" role="presentation">
       {remaining}
     </span>
   )
