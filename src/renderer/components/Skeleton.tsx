@@ -1,5 +1,13 @@
+/**
+ * Skeleton Loading Components
+ *
+ * Provides loading placeholder animations for content.
+ * Accessibility: Includes ARIA labels and reduced motion support.
+ */
+
 import React from "react"
 import { motion } from "framer-motion"
+import { useReducedMotion } from "../hooks/useAccessibility"
 
 // Base skeleton shimmer animation
 const shimmer = {
@@ -21,8 +29,9 @@ interface SkeletonProps {
   rounded?: "sm" | "md" | "lg" | "xl" | "full"
 }
 
-// Base skeleton element
+// Base skeleton element with accessibility support
 export function Skeleton({ className = "", width, height, rounded = "md" }: SkeletonProps) {
+  const prefersReducedMotion = useReducedMotion()
   const roundedClass = {
     sm: "rounded-sm",
     md: "rounded-md",
@@ -35,13 +44,18 @@ export function Skeleton({ className = "", width, height, rounded = "md" }: Skel
     <div
       className={`relative overflow-hidden bg-white/[0.06] ${roundedClass} ${className}`}
       style={{ width, height }}
+      role="progressbar"
+      aria-busy="true"
+      aria-valuetext="Loading"
     >
-      <motion.div
-        className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent"
-        variants={shimmer}
-        initial="hidden"
-        animate="visible"
-      />
+      {!prefersReducedMotion && (
+        <motion.div
+          className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent"
+          variants={shimmer}
+          initial="hidden"
+          animate="visible"
+        />
+      )}
     </div>
   )
 }
@@ -233,7 +247,7 @@ export function SkeletonFullPage() {
   )
 }
 
-// Loading spinner with pulse animation
+// Loading spinner with pulse animation and reduced motion support
 export function LoadingSpinner({
   size = 24,
   className = ""
@@ -241,6 +255,39 @@ export function LoadingSpinner({
   size?: number
   className?: string
 }) {
+  const prefersReducedMotion = useReducedMotion()
+
+  const content = (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className="text-indigo-400"
+      role="status"
+      aria-label="Loading"
+    >
+      <circle
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeOpacity="0.2"
+      />
+      <path
+        d="M12 2a10 10 0 0 1 10 10"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+
+  if (prefersReducedMotion) {
+    return <div className={className} style={{ width: size, height: size }}>{content}</div>
+  }
+
   return (
     <motion.div
       className={className}
@@ -248,57 +295,45 @@ export function LoadingSpinner({
       animate={{ rotate: 360 }}
       transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
     >
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        fill="none"
-        className="text-indigo-400"
-      >
-        <circle
-          cx="12"
-          cy="12"
-          r="10"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeOpacity="0.2"
-        />
-        <path
-          d="M12 2a10 10 0 0 1 10 10"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-      </svg>
+      {content}
     </motion.div>
   )
 }
 
-// Dots loading animation (like typing indicator)
+// Dots loading animation (like typing indicator) with reduced motion support
 export function LoadingDots({ className = "" }: { className?: string }) {
+  const prefersReducedMotion = useReducedMotion()
+
   return (
-    <div className={`flex items-center gap-1 ${className}`}>
+    <div className={`flex items-center gap-1 ${className}`} role="status" aria-label="Loading">
       {[0, 1, 2].map((i) => (
-        <motion.div
-          key={i}
-          className="w-2 h-2 rounded-full bg-indigo-400"
-          animate={{
-            y: [0, -6, 0],
-            opacity: [0.5, 1, 0.5]
-          }}
-          transition={{
-            duration: 0.6,
-            repeat: Infinity,
-            delay: i * 0.15,
-            ease: "easeInOut"
-          }}
-        />
+        prefersReducedMotion ? (
+          <div
+            key={i}
+            className="w-2 h-2 rounded-full bg-indigo-400"
+          />
+        ) : (
+          <motion.div
+            key={i}
+            className="w-2 h-2 rounded-full bg-indigo-400"
+            animate={{
+              y: [0, -6, 0],
+              opacity: [0.5, 1, 0.5]
+            }}
+            transition={{
+              duration: 0.6,
+              repeat: Infinity,
+              delay: i * 0.15,
+              ease: "easeInOut"
+            }}
+          />
+        )
       ))}
     </div>
   )
 }
 
-// Content loading overlay
+// Content loading overlay with accessibility support
 export function LoadingOverlay({
   message = "Loading...",
   className = ""
@@ -306,15 +341,90 @@ export function LoadingOverlay({
   message?: string
   className?: string
 }) {
+  const prefersReducedMotion = useReducedMotion()
+
+  if (prefersReducedMotion) {
+    return (
+      <div
+        className={`absolute inset-0 bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center z-50 ${className}`}
+        role="alert"
+        aria-busy="true"
+        aria-label={message}
+      >
+        <LoadingSpinner size={32} className="mb-3" />
+        <p className="text-white/70 text-sm">{message}</p>
+      </div>
+    )
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className={`absolute inset-0 bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center z-50 ${className}`}
+      role="alert"
+      aria-busy="true"
+      aria-label={message}
     >
       <LoadingSpinner size={32} className="mb-3" />
       <p className="text-white/70 text-sm">{message}</p>
     </motion.div>
+  )
+}
+
+/**
+ * Progress bar with accessibility support
+ */
+export function ProgressBar({
+  progress,
+  height = 4,
+  color = '#6366f1',
+  backgroundColor = 'rgba(255,255,255,0.1)',
+  className = '',
+  showLabel = false
+}: {
+  progress: number
+  height?: number
+  color?: string
+  backgroundColor?: string
+  className?: string
+  showLabel?: boolean
+}) {
+  const prefersReducedMotion = useReducedMotion()
+  const clampedProgress = Math.min(100, Math.max(0, progress))
+
+  return (
+    <div className={className}>
+      <div
+        className="w-full rounded-full overflow-hidden"
+        style={{ height, background: backgroundColor }}
+        role="progressbar"
+        aria-valuenow={clampedProgress}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`Progress: ${clampedProgress}%`}
+      >
+        {prefersReducedMotion ? (
+          <div
+            className="h-full rounded-full"
+            style={{ background: color, width: `${clampedProgress}%` }}
+          />
+        ) : (
+          <motion.div
+            className="h-full rounded-full"
+            style={{ background: color }}
+            initial={{ width: 0 }}
+            animate={{ width: `${clampedProgress}%` }}
+            transition={{ duration: 0.3, ease: 'easeOut' }}
+          />
+        )}
+      </div>
+      {showLabel && (
+        <p className="text-xs text-white/60 mt-1 text-right">
+          {Math.round(clampedProgress)}%
+        </p>
+      )}
+    </div>
   )
 }
