@@ -261,3 +261,272 @@ export function useId(prefix: string = 'pulse'): string {
   const [id] = useState(() => `${prefix}-${++idCounter}`)
   return id
 }
+
+// ============================================================================
+// useRovingTabIndex
+// ============================================================================
+
+/**
+ * Hook for roving tabindex pattern (single tab stop with arrow key navigation)
+ * Useful for toolbars, tab lists, and menu items
+ */
+export function useRovingTabIndex<T extends HTMLElement>(
+  itemCount: number,
+  options: {
+    initialIndex?: number
+    wrap?: boolean
+    horizontal?: boolean
+    onFocus?: (index: number) => void
+    onSelect?: (index: number) => void
+  } = {}
+) {
+  const {
+    initialIndex = 0,
+    wrap = true,
+    horizontal = true,
+    onFocus,
+    onSelect
+  } = options
+
+  const [focusedIndex, setFocusedIndex] = useState(initialIndex)
+  const itemRefs = useRef<(T | null)[]>([])
+
+  const setItemRef = useCallback((index: number) => (el: T | null) => {
+    itemRefs.current[index] = el
+  }, [])
+
+  const focusItem = useCallback((index: number) => {
+    if (index >= 0 && index < itemCount) {
+      setFocusedIndex(index)
+      itemRefs.current[index]?.focus()
+      onFocus?.(index)
+    }
+  }, [itemCount, onFocus])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const prevKey = horizontal ? 'ArrowLeft' : 'ArrowUp'
+    const nextKey = horizontal ? 'ArrowRight' : 'ArrowDown'
+
+    let newIndex = focusedIndex
+
+    switch (e.key) {
+      case prevKey:
+        e.preventDefault()
+        if (focusedIndex > 0) {
+          newIndex = focusedIndex - 1
+        } else if (wrap) {
+          newIndex = itemCount - 1
+        }
+        break
+      case nextKey:
+        e.preventDefault()
+        if (focusedIndex < itemCount - 1) {
+          newIndex = focusedIndex + 1
+        } else if (wrap) {
+          newIndex = 0
+        }
+        break
+      case 'Home':
+        e.preventDefault()
+        newIndex = 0
+        break
+      case 'End':
+        e.preventDefault()
+        newIndex = itemCount - 1
+        break
+      case 'Enter':
+      case ' ':
+        e.preventDefault()
+        onSelect?.(focusedIndex)
+        return
+      default:
+        return
+    }
+
+    if (newIndex !== focusedIndex) {
+      focusItem(newIndex)
+    }
+  }, [focusedIndex, itemCount, wrap, horizontal, onSelect, focusItem])
+
+  const getItemProps = useCallback((index: number) => ({
+    ref: setItemRef(index),
+    tabIndex: index === focusedIndex ? 0 : -1,
+    onKeyDown: handleKeyDown,
+    onFocus: () => setFocusedIndex(index),
+    role: 'option',
+    'aria-selected': index === focusedIndex
+  }), [focusedIndex, setItemRef, handleKeyDown])
+
+  return {
+    focusedIndex,
+    setFocusedIndex,
+    focusItem,
+    getItemProps,
+    handleKeyDown
+  }
+}
+
+// ============================================================================
+// useHotkey
+// ============================================================================
+
+type ModifierKey = 'ctrl' | 'shift' | 'alt' | 'meta'
+
+interface HotkeyConfig {
+  key: string
+  modifiers?: ModifierKey[]
+  callback: (e: KeyboardEvent) => void
+  enabled?: boolean
+  preventDefault?: boolean
+}
+
+/**
+ * Hook for handling global keyboard shortcuts
+ */
+export function useHotkey(config: HotkeyConfig): void {
+  const { key, modifiers = [], callback, enabled = true, preventDefault = true } = config
+
+  useEffect(() => {
+    if (!enabled) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const keyMatches = e.key.toLowerCase() === key.toLowerCase()
+      const ctrlMatches = modifiers.includes('ctrl') === (e.ctrlKey || e.metaKey)
+      const shiftMatches = modifiers.includes('shift') === e.shiftKey
+      const altMatches = modifiers.includes('alt') === e.altKey
+      const metaMatches = modifiers.includes('meta') === e.metaKey
+
+      if (keyMatches && ctrlMatches && shiftMatches && altMatches && metaMatches) {
+        if (preventDefault) {
+          e.preventDefault()
+        }
+        callback(e)
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [key, modifiers, callback, enabled, preventDefault])
+}
+
+/**
+ * Hook for handling multiple global keyboard shortcuts
+ */
+export function useHotkeys(configs: HotkeyConfig[]): void {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      for (const config of configs) {
+        if (config.enabled === false) continue
+
+        const { key, modifiers = [], callback, preventDefault = true } = config
+
+        const keyMatches = e.key.toLowerCase() === key.toLowerCase()
+        const ctrlMatches = modifiers.includes('ctrl') === (e.ctrlKey || e.metaKey)
+        const shiftMatches = modifiers.includes('shift') === e.shiftKey
+        const altMatches = modifiers.includes('alt') === e.altKey
+        const metaMatches = modifiers.includes('meta') === e.metaKey
+
+        if (keyMatches && ctrlMatches && shiftMatches && altMatches && metaMatches) {
+          if (preventDefault) {
+            e.preventDefault()
+          }
+          callback(e)
+          return
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [configs])
+}
+
+// ============================================================================
+// useTypeahead
+// ============================================================================
+
+/**
+ * Hook for typeahead/search-by-typing in lists
+ */
+export function useTypeahead<T>(
+  items: T[],
+  options: {
+    getLabel: (item: T) => string
+    onMatch?: (index: number) => void
+    timeout?: number
+  }
+) {
+  const { getLabel, onMatch, timeout = 500 } = options
+  const [searchString, setSearchString] = useState('')
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent | KeyboardEvent) => {
+    // Only handle printable characters
+    if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) {
+      return
+    }
+
+    // Clear previous timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+    }
+
+    const newSearchString = searchString + e.key.toLowerCase()
+    setSearchString(newSearchString)
+
+    // Find matching item
+    const matchIndex = items.findIndex(item =>
+      getLabel(item).toLowerCase().startsWith(newSearchString)
+    )
+
+    if (matchIndex !== -1) {
+      onMatch?.(matchIndex)
+    }
+
+    // Clear search string after timeout
+    timeoutRef.current = setTimeout(() => {
+      setSearchString('')
+    }, timeout)
+  }, [searchString, items, getLabel, onMatch, timeout])
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+      }
+    }
+  }, [])
+
+  return {
+    searchString,
+    handleKeyDown,
+    clearSearch: () => setSearchString('')
+  }
+}
+
+// ============================================================================
+// useSkipLink
+// ============================================================================
+
+/**
+ * Hook for skip link functionality (skip to main content)
+ */
+export function useSkipLink(targetId: string = 'main-content') {
+  const skipToMain = useCallback(() => {
+    const target = document.getElementById(targetId)
+    if (target) {
+      target.tabIndex = -1
+      target.focus()
+      // Announce to screen readers
+      announce(`Skipped to main content`)
+    }
+  }, [targetId])
+
+  return {
+    skipToMain,
+    targetProps: {
+      id: targetId,
+      tabIndex: -1
+    }
+  }
+}
