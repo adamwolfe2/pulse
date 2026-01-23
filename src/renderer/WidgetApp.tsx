@@ -1,6 +1,9 @@
 /**
  * Pulse Widget - Glass Morphism Design
  * Minimal, fast, smooth AI assistant
+ *
+ * Accessibility: Implements WCAG 2.1 AA compliance with ARIA labels,
+ * keyboard navigation, and screen reader support.
  */
 
 import { useEffect, useState, useRef, useCallback } from "react"
@@ -13,6 +16,9 @@ import { SettingsWindow } from "./components/Settings/SettingsWindow"
 import { OnboardingFlow } from "./components/Onboarding/OnboardingFlow"
 import { useTaskStore } from "./stores/taskStore"
 import { useToast } from "./components/Toast"
+import { useReducedMotion, useAnnounce } from "./hooks/useAccessibility"
+import { ARIA_LABELS } from "./lib/accessibility"
+import { ANIMATIONS } from "../shared/constants"
 import "./styles/glass.css"
 
 interface Message {
@@ -22,22 +28,19 @@ interface Message {
   timestamp?: number
 }
 
-// Smooth, snappy animations
-const spring = {
-  type: "spring" as const,
-  stiffness: 400,
-  damping: 30,
-  mass: 0.8
-}
-
-const springBouncy = {
-  type: "spring" as const,
-  stiffness: 500,
-  damping: 25,
-  mass: 0.8
-}
-
 export function WidgetApp() {
+  // Use centralized animation presets with reduced motion support
+  const prefersReducedMotion = useReducedMotion()
+  const { announce } = useAnnounce()
+
+  // Respect user's motion preferences
+  const spring = prefersReducedMotion
+    ? { type: "tween" as const, duration: 0 }
+    : ANIMATIONS.SPRING.SNAPPY
+
+  const springBouncy = prefersReducedMotion
+    ? { type: "tween" as const, duration: 0 }
+    : ANIMATIONS.SPRING.BOUNCY
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -278,37 +281,40 @@ export function WidgetApp() {
             <span className="text-white/90 text-sm font-medium">Pulse</span>
           </div>
 
-          <div className="flex items-center gap-1 no-drag">
+          <div className="flex items-center gap-1 no-drag" role="toolbar" aria-label="Window controls">
             {/* Tasks */}
             <motion.button
               onClick={toggleTaskList}
               className="glass-icon-button"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
+              whileTap={prefersReducedMotion ? {} : { scale: 0.95 }}
               title="Tasks (⌘⇧L)"
+              aria-label="Toggle task list"
             >
-              <ListTodo size={16} />
+              <ListTodo size={16} aria-hidden="true" />
             </motion.button>
 
             {/* Settings */}
             <motion.button
               onClick={() => setShowSettings(true)}
               className="glass-icon-button"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
+              whileTap={prefersReducedMotion ? {} : { scale: 0.95 }}
               title="Settings"
+              aria-label={ARIA_LABELS.SETTINGS}
             >
-              <Settings size={16} />
+              <Settings size={16} aria-hidden="true" />
             </motion.button>
 
             {/* Close */}
             <motion.button
               onClick={handleClose}
               className="glass-icon-button"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
+              whileTap={prefersReducedMotion ? {} : { scale: 0.95 }}
+              aria-label={ARIA_LABELS.CLOSE_WINDOW}
             >
-              <X size={16} />
+              <X size={16} aria-hidden="true" />
             </motion.button>
           </div>
         </div>
@@ -317,7 +323,12 @@ export function WidgetApp() {
         <div className="mx-4 h-px bg-white/10" />
 
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 glass-scrollbar">
+        <div
+          className="flex-1 overflow-y-auto px-4 py-3 glass-scrollbar"
+          role="log"
+          aria-label={ARIA_LABELS.CHAT_MESSAGES}
+          aria-live="polite"
+        >
           {!hasMessages ? (
             <motion.div
               className="h-full flex flex-col items-center justify-center text-center"
@@ -333,10 +344,12 @@ export function WidgetApp() {
               {messages.map((msg) => (
                 <motion.div
                   key={msg.id}
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={prefersReducedMotion ? {} : { opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={spring}
                   className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                  role="article"
+                  aria-label={msg.role === "user" ? ARIA_LABELS.USER_MESSAGE : ARIA_LABELS.AI_RESPONSE}
                 >
                   <div
                     className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${
@@ -397,28 +410,31 @@ export function WidgetApp() {
         </div>
 
         {/* Input Area */}
-        <div className="px-3 pb-3 pt-2">
+        <div className="px-3 pb-3 pt-2" role="form" aria-label="Message input">
           <div className="flex items-center gap-2">
             {/* Screenshot */}
             <motion.button
               onClick={handleCapture}
               className="glass-icon-button"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
+              whileTap={prefersReducedMotion ? {} : { scale: 0.95 }}
               title="Screenshot (⌘⇧S)"
+              aria-label={ARIA_LABELS.CAPTURE_SCREENSHOT}
             >
-              <Camera size={18} />
+              <Camera size={18} aria-hidden="true" />
             </motion.button>
 
             {/* Voice */}
             <motion.button
               onClick={isListening ? stopListening : startListening}
               className={`glass-icon-button ${isListening ? "!bg-red-500/30 !text-red-400" : ""}`}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={prefersReducedMotion ? {} : { scale: 1.1 }}
+              whileTap={prefersReducedMotion ? {} : { scale: 0.95 }}
               title="Voice (⌘⇧V)"
+              aria-label={isListening ? "Stop voice recording" : ARIA_LABELS.TOGGLE_VOICE}
+              aria-pressed={isListening}
             >
-              <Mic size={18} />
+              <Mic size={18} aria-hidden="true" />
             </motion.button>
 
             {/* Input */}
@@ -435,6 +451,8 @@ export function WidgetApp() {
               }}
               placeholder={isListening ? "Listening..." : "Ask anything..."}
               className="glass-input"
+              aria-label={ARIA_LABELS.MESSAGE_INPUT}
+              aria-describedby="shortcut-hints"
             />
 
             {/* Send */}
@@ -446,16 +464,18 @@ export function WidgetApp() {
                   ? "!bg-white/20"
                   : "!bg-white/5 !text-white/30"
               }`}
-              whileHover={inputValue.trim() && !isLoading ? { scale: 1.05 } : {}}
-              whileTap={inputValue.trim() && !isLoading ? { scale: 0.95 } : {}}
+              whileHover={inputValue.trim() && !isLoading && !prefersReducedMotion ? { scale: 1.05 } : {}}
+              whileTap={inputValue.trim() && !isLoading && !prefersReducedMotion ? { scale: 0.95 } : {}}
               style={{ padding: "0 12px", height: 36 }}
+              aria-label={ARIA_LABELS.SEND_MESSAGE}
+              aria-disabled={!inputValue.trim() || isLoading}
             >
-              <Send size={16} />
+              <Send size={16} aria-hidden="true" />
             </motion.button>
           </div>
 
           {/* Shortcuts hint */}
-          <div className="flex items-center justify-center gap-3 mt-2">
+          <div id="shortcut-hints" className="flex items-center justify-center gap-3 mt-2" aria-label="Keyboard shortcuts">
             <span className="text-white/25 text-[10px]">⌘⇧G toggle</span>
             <span className="text-white/25 text-[10px]">⌘⇧S screenshot</span>
             <span className="text-white/25 text-[10px]">⌘⇧T task</span>
